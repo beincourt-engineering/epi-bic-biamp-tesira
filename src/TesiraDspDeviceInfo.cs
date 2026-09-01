@@ -407,7 +407,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             FireAllFeedbacks();
         }
 
-        private void FireAllFeedbacks()
+        internal void FireAllFeedbacks()
         {
             foreach (var feedback in Feedbacks)
             {
