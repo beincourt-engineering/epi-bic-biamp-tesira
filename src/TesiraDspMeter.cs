@@ -39,6 +39,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         int currentMeter;
 
         /// <summary>
+        /// The last level the meter reported, in dB, before scaling. Updated just before
+        /// <see cref="MeterFeedback"/> fires.
+        /// </summary>
+        public double LevelDb { get; private set; }
+
+        /// <summary>
         /// Represents the subscription status of the meter.
         /// </summary>
         public BoolFeedback SubscribedFeedback { get; set; }
@@ -79,6 +85,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 meterMaximum = meterMaximumDefault;
                 defaultPollTime = defaultPollTimeDefault;
             }
+
+            LevelDb = meterMinimum;
         }
 
         public override void Subscribe()
@@ -107,8 +115,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             SubscribedFeedback.FireUpdate();
 
             this.LogVerbose("Parsing Message: {message}", message);
-            var value = double.Parse(message).Scale(meterMinimum, meterMaximum, ushort.MinValue, ushort.MaxValue, this);
-            currentMeter = (ushort)value;
+            LevelDb = double.Parse(message);
+            var value = LevelDb.Scale(meterMinimum, meterMaximum, ushort.MinValue, ushort.MaxValue, this);
+
+            // A level outside meterMinimum..meterMaximum would wrap in the ushort cast (a level just
+            // over the maximum read as near silence), so pin it to the ends of the range.
+            currentMeter = (ushort)Math.Max(ushort.MinValue, Math.Min(ushort.MaxValue, value));
 
             this.LogVerbose("Scaled Meter Value: {currentMeter}", currentMeter);
             MeterFeedback.FireUpdate();
