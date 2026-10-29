@@ -24,4 +24,9 @@
     <!-- Builds the plugin before tests run; DLL is loaded via MetadataLoadContext, not referenced. -->
     <ProjectReference Include="..\src\Tesira-DSP-EPI.4Series.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Free of Crestron types, so compiled in directly and exercised, unlike the plugin DLL. -->
+    <Compile Include="..\src\TesiraDeviceInfoParser.cs" Link="TesiraDeviceInfoParser.cs" />
+  </ItemGroup>
 </Project>

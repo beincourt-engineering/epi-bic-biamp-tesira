@@ -197,44 +197,24 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
                 if (message.IndexOf("+OK", StringComparison.OrdinalIgnoreCase) <= -1) return;
 
-                var matches = parseRegex.Matches(message);
-
-                if (matches == null || matches.Count == 0)
-                {
-                    this.LogWarning("No matches found when parsing device info message: {message}", message);
-                    return;
-                }
-
-                // Add detailed logging for debugging
                 this.LogDebug("Raw response for {attributeCode}: {message}", attributeCode, message);
-                this.LogDebug("Regex matches for {attributeCode}: [{matches}]",
-                    attributeCode,
-                    string.Join(", ", matches.Cast<Match>().Select((m, i) => $"[{i}]='{m.Value}'")));
 
                 switch (attributeCode)
                 {
                     case "networkStatus":
                         {
-                            this.LogVerbose("Network Status match count: {count}", matches.Count);
+                            // Fields by name: the reply is an object, and the first quoted string in
+                            // it is the word "value", not the hostname.
+                            var hostname = TesiraDeviceInfoParser.Field(message, "hostname");
+                            var macAddress = TesiraDeviceInfoParser.Field(message, "macAddress");
+                            var ipAddress = TesiraDeviceInfoParser.Field(message, "ip");
 
-                            // More defensive parsing - check bounds before accessing
-                            if (matches.Count >= 1 && !string.IsNullOrEmpty(matches[0].Value))
-                            {
-                                Hostname = matches[0].Value.Trim('"');
-                                this.LogDebug("Parsed Hostname: {hostname}", Hostname);
-                            }
+                            if (hostname != null) Hostname = hostname;
+                            if (macAddress != null) MacAddress = macAddress;
+                            if (ipAddress != null) IpAddress = ipAddress;
 
-                            if (matches.Count >= 4 && !string.IsNullOrEmpty(matches[3].Value))
-                            {
-                                MacAddress = matches[3].Value.Trim('"');
-                                this.LogDebug("Parsed MacAddress: {macAddress}", MacAddress);
-                            }
-
-                            if (matches.Count >= 5 && !string.IsNullOrEmpty(matches[4].Value))
-                            {
-                                IpAddress = matches[4].Value.Trim('"');
-                                this.LogDebug("Parsed IpAddress: {ipAddress}", IpAddress);
-                            }
+                            this.LogDebug("Parsed Hostname: {hostname}, MacAddress: {macAddress}, IpAddress: {ipAddress}",
+                                Hostname, MacAddress, IpAddress);
 
                             // Mirror onto the DeviceInfo DTO consumed by IDeviceInfoProvider
                             // clients (Mobile Control, device info reporting).
@@ -248,7 +228,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
                     case "serialNumber":
                         {
-                            SerialNumber = matches[0].Value.Trim('"');
+                            var serialNumber = TesiraDeviceInfoParser.Value(message);
+                            if (serialNumber == null) break;
+
+                            SerialNumber = serialNumber;
                             this.LogDebug("Parsed SerialNumber: {serialNumber}", SerialNumber);
 
                             DeviceInfo.SerialNumber = SerialNumber;
@@ -259,7 +242,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
                     case "version":
                         {
-                            Firmware = matches[0].Value.Trim('"');
+                            var firmware = TesiraDeviceInfoParser.Value(message);
+                            if (firmware == null) break;
+
+                            Firmware = firmware;
                             this.LogDebug("Parsed Firmware: {firmware}", Firmware);
 
                             DeviceInfo.FirmwareVersion = Firmware;
