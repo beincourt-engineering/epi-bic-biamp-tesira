@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Crestron.SimplSharp;
 using Crestron.SimplSharpPro.DeviceSupport;
 using Newtonsoft.Json;
 using Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Bridge.JoinMaps.Standalone;
@@ -140,13 +141,35 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         {
             if (string.IsNullOrEmpty(commHostname)) return;
 
-            Hostname = commHostname;
             IpAddress = commHostname;
-
-            DeviceInfo.HostName = commHostname;
             DeviceInfo.IpAddress = commHostname;
 
+            // An address is not a host name; leave it empty until the DSP names itself.
+            if (!System.Net.IPAddress.TryParse(commHostname, out _))
+            {
+                Hostname = commHostname;
+                DeviceInfo.HostName = commHostname;
+            }
+
             OnDeviceInfoChanged();
+        }
+
+        /// <summary>Asks again while anything is missing: every minute at first, then every ten.</summary>
+        private const long RetryFastMs = 60000;
+        private const long RetrySlowMs = 600000;
+        private const int FastRetries = 5;
+
+        private readonly object retryLock = new object();
+        private CTimer retryTimer;
+        private int retries;
+
+        private bool Complete
+        {
+            get
+            {
+                return !string.IsNullOrEmpty(SerialNumber) && !string.IsNullOrEmpty(Firmware)
+                    && !string.IsNullOrEmpty(MacAddress);
+            }
         }
 
         public void GetDeviceInfo()
@@ -155,6 +178,41 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             GetIpConfig();
             GetSerial();
             GetServers();
+
+            ScheduleRetry();
+        }
+
+        /// <summary>
+        /// The questions are asked once per subscribe, and a reply that lands on the wrong command
+        /// is ignored, so ask again until serial, firmware and MAC have all arrived.
+        /// </summary>
+        private void ScheduleRetry()
+        {
+            lock (retryLock)
+            {
+                var due = retries < FastRetries ? RetryFastMs : RetrySlowMs;
+                if (retryTimer == null)
+                {
+                    retryTimer = new CTimer(_ => RetryIfIncomplete(), due);
+                }
+                else
+                {
+                    retryTimer.Reset(due);
+                }
+            }
+        }
+
+        private void RetryIfIncomplete()
+        {
+            if (Complete)
+            {
+                retries = 0;
+                return;
+            }
+
+            retries++;
+            this.LogDebug("Device info incomplete, asking again (attempt {attempt})", retries);
+            GetDeviceInfo();
         }
 
 
@@ -203,15 +261,18 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 {
                     case "networkStatus":
                         {
-                            // Fields by name: the reply is an object, and the first quoted string in
-                            // it is the word "value", not the hostname.
-                            var hostname = TesiraDeviceInfoParser.Field(message, "hostname");
-                            var macAddress = TesiraDeviceInfoParser.Field(message, "macAddress");
-                            var ipAddress = TesiraDeviceInfoParser.Field(message, "ip");
+                            // Null when this isn't a networkStatus reply: replies are matched to
+                            // commands by order, and a late one lands on the wrong command.
+                            var status = TesiraDeviceInfoParser.NetworkStatus(message);
+                            if (status == null)
+                            {
+                                this.LogDebug("Not a networkStatus reply, ignored: {message}", message);
+                                break;
+                            }
 
-                            if (hostname != null) Hostname = hostname;
-                            if (macAddress != null) MacAddress = macAddress;
-                            if (ipAddress != null) IpAddress = ipAddress;
+                            if (status.Hostname != null) Hostname = status.Hostname;
+                            MacAddress = status.MacAddress;
+                            if (status.IpAddress != null) IpAddress = status.IpAddress;
 
                             this.LogDebug("Parsed Hostname: {hostname}, MacAddress: {macAddress}, IpAddress: {ipAddress}",
                                 Hostname, MacAddress, IpAddress);
@@ -228,8 +289,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
                     case "serialNumber":
                         {
-                            var serialNumber = TesiraDeviceInfoParser.Value(message);
-                            if (serialNumber == null) break;
+                            var serialNumber = TesiraDeviceInfoParser.Serial(message);
+                            if (serialNumber == null)
+                            {
+                                this.LogDebug("Not a serialNumber reply, ignored: {message}", message);
+                                break;
+                            }
 
                             SerialNumber = serialNumber;
                             this.LogDebug("Parsed SerialNumber: {serialNumber}", SerialNumber);
@@ -242,8 +307,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
                     case "version":
                         {
-                            var firmware = TesiraDeviceInfoParser.Value(message);
-                            if (firmware == null) break;
+                            var firmware = TesiraDeviceInfoParser.Firmware(message);
+                            if (firmware == null)
+                            {
+                                this.LogDebug("Not a version reply, ignored: {message}", message);
+                                break;
+                            }
 
                             Firmware = firmware;
                             this.LogDebug("Parsed Firmware: {firmware}", Firmware);

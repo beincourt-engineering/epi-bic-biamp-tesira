@@ -396,6 +396,9 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
             DeviceManager.AddDevice(DevInfo);
 
+            // The DSP is the IDeviceInfoProvider clients ask, so its event carries the component's.
+            DevInfo.DeviceInfoChanged += (sender, args) => DeviceInfoChanged?.Invoke(this, args);
+
             // Seed from the configured comm hostname so the bridge reports something useful
             // before the DSP answers 'DEVICE get networkStatus'.
             DevInfo.SeedFromCommunication(configuredHostname);

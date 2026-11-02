@@ -4,59 +4,131 @@ using Xunit;
 namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Tests;
 
 /// <summary>
-/// The device info component reads its replies through this parser. Every reply to a get starts
-/// <c>+OK "value":</c>, so reading the first quoted string returns the word "value".
+/// The device info component reads its replies through this parser. The plugin runs the session
+/// non-verbose, so replies carry values without names; verbose replies are read too. Replies are
+/// matched to commands by order, so a reader must refuse another attribute's reply.
 /// </summary>
 public class TesiraDeviceInfoParserTests
 {
-    private const string NetworkStatus =
+    private const string VerboseNetworkStatus =
         "+OK \"value\":{\"schemaVersion\":2 \"hostname\":\"TesiraForte\" \"defaultGatewayStatus\":\"192.0.2.1\" " +
         "\"networkInterfaceStatusWithName\":[{\"interfaceId\":\"control\" \"networkInterfaceStatus\":{" +
         "\"macAddress\":\"00:90:5e:13:3b:27\" \"linkStatus\":LINK_1_GB \"addressSource\":STATIC \"ip\":\"192.0.2.10\" " +
         "\"netmask\":\"255.255.255.0\" \"dhcpLeaseObtainedDate\":\"\" \"dhcpLeaseExpiresDate\":\"\" \"gateway\":\"192.0.2.1\"}}] " +
         "\"dnsStatus\":{\"primaryDNSServer\":\"\" \"secondaryDNSServer\":\"\" \"domainName\":\"\"} \"mDNSEnabled\":true}";
 
+    // The same reply with the names left out, as the non-verbose session sends it: hostname,
+    // gateway, then the interface's name, MAC and address - the order the original positional
+    // parser read (strings 0, 3 and 4).
+    private const string NetworkStatus =
+        "+OK {2 \"TesiraForte\" \"192.0.2.1\" [{\"control\" {\"00:90:5e:13:3b:27\" LINK_1_GB STATIC \"192.0.2.10\" " +
+        "\"255.255.255.0\" \"\" \"\" \"192.0.2.1\"}}] {\"\" \"\" \"\"} true}";
+
+    private const string DiscoveredServers =
+        "+OK [[\"192.0.2.10\" \"TesiraForte\" false 1 11] [\"192.0.2.11\" \"TesiraForte2\" false 1 11]]";
+
     [Theory]
+    [InlineData("+OK \"4.7.2.24086\"", "4.7.2.24086")]
+    [InlineData("+OK \"5.7.1.4\"\r", "5.7.1.4")]
     [InlineData("+OK \"value\":\"4.7.2.24086\"", "4.7.2.24086")]
-    [InlineData("+OK \"value\":\"04223456\"", "04223456")]
-    [InlineData("+OK \"value\":\"04223456\"\r", "04223456")]
-    [InlineData("+OK \"value\":-12.000000", "-12.000000")]
-    public void Reads_the_value_after_its_key(string reply, string expected)
+    public void Reads_the_firmware_version_in_either_style(string reply, string expected)
     {
-        TesiraDeviceInfoParser.Value(reply).Should().Be(expected);
+        TesiraDeviceInfoParser.Firmware(reply).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("+OK \"04223456\"", "04223456")]
+    [InlineData("+OK \"04223456\"\r", "04223456")]
+    [InlineData("+OK \"value\":\"04223456\"", "04223456")]
+    public void Reads_the_serial_number_in_either_style(string reply, string expected)
+    {
+        TesiraDeviceInfoParser.Serial(reply).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(VerboseNetworkStatus)]
+    [InlineData(NetworkStatus)]
+    public void Reads_host_name_mac_and_address_in_either_style(string reply)
+    {
+        var status = TesiraDeviceInfoParser.NetworkStatus(reply);
+
+        status.Should().NotBeNull();
+        status!.Hostname.Should().Be("TesiraForte");
+        status.MacAddress.Should().Be("00:90:5e:13:3b:27");
+        status.IpAddress.Should().Be("192.0.2.10");
+    }
+
+    [Fact]
+    public void Address_is_not_confused_with_the_gateway()
+    {
+        TesiraDeviceInfoParser.NetworkStatus(NetworkStatus)!.IpAddress.Should().NotBe("192.0.2.1");
+        TesiraDeviceInfoParser.NetworkStatus(VerboseNetworkStatus)!.IpAddress.Should().NotBe("192.0.2.1");
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("+OK")]
+    [InlineData("+OK \"\"")]
     [InlineData("+OK \"value\":\"\"")]
     [InlineData("-ERR address not found: {\"deviceId\":0 \"classCode\":0 \"instanceNum\":0}")]
     public void A_reply_without_a_value_is_none(string? reply)
     {
-        TesiraDeviceInfoParser.Value(reply!).Should().BeNull();
+        TesiraDeviceInfoParser.Firmware(reply!).Should().BeNull();
+        TesiraDeviceInfoParser.Serial(reply!).Should().BeNull();
+        TesiraDeviceInfoParser.NetworkStatus(reply!).Should().BeNull();
+    }
+
+    // A late reply shifts every reply after it onto the next command: a version reply has been
+    // seen arriving as the discoveredServers answer, and the discoveredServers list as a level's.
+
+    [Theory]
+    [InlineData("+OK \"5.7.1.4\"")]
+    [InlineData(NetworkStatus)]
+    [InlineData(DiscoveredServers)]
+    [InlineData("+OK -12.000000")]
+    [InlineData("+OK true")]
+    [InlineData("+OK \"BIC-DSP1\"")]
+    [InlineData("+OK \"Preset\"")]
+    public void Another_attribute_s_reply_is_not_a_serial_number(string reply)
+    {
+        TesiraDeviceInfoParser.Serial(reply).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("+OK \"04223456\"")]
+    [InlineData(NetworkStatus)]
+    [InlineData(DiscoveredServers)]
+    [InlineData("+OK -12.000000")]
+    [InlineData("+OK \"192.0.2.10\"")]
+    public void Another_attribute_s_reply_is_not_a_version(string reply)
+    {
+        TesiraDeviceInfoParser.Firmware(reply).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("+OK \"5.7.1.4\"")]
+    [InlineData("+OK \"04223456\"")]
+    [InlineData(DiscoveredServers)]
+    [InlineData("+OK -12.000000")]
+    public void Another_attribute_s_reply_is_not_a_network_status(string reply)
+    {
+        TesiraDeviceInfoParser.NetworkStatus(reply).Should().BeNull();
     }
 
     [Fact]
-    public void Reads_network_fields_by_name_not_position()
+    public void Value_reads_either_style()
     {
-        TesiraDeviceInfoParser.Field(NetworkStatus, "hostname").Should().Be("TesiraForte");
-        TesiraDeviceInfoParser.Field(NetworkStatus, "macAddress").Should().Be("00:90:5e:13:3b:27");
-        TesiraDeviceInfoParser.Field(NetworkStatus, "ip").Should().Be("192.0.2.10");
-    }
-
-    [Fact]
-    public void Ip_is_not_confused_with_gateway_or_dns()
-    {
-        // "defaultGatewayStatus" and "gateway" hold addresses too; only "ip" is the device's own.
-        TesiraDeviceInfoParser.Field(NetworkStatus, "ip").Should().NotBe("192.0.2.1");
+        TesiraDeviceInfoParser.Value("+OK \"value\":-12.000000").Should().Be("-12.000000");
+        TesiraDeviceInfoParser.Value("+OK -12.000000").Should().Be("-12.000000");
+        TesiraDeviceInfoParser.Value("+OK \"04223456\"").Should().Be("04223456");
     }
 
     [Fact]
     public void An_empty_or_missing_field_is_none()
     {
-        TesiraDeviceInfoParser.Field(NetworkStatus, "domainName").Should().BeNull();
-        TesiraDeviceInfoParser.Field(NetworkStatus, "serialNumber").Should().BeNull();
+        TesiraDeviceInfoParser.Field(VerboseNetworkStatus, "domainName").Should().BeNull();
+        TesiraDeviceInfoParser.Field(VerboseNetworkStatus, "serialNumber").Should().BeNull();
         TesiraDeviceInfoParser.Field("", "hostname").Should().BeNull();
     }
 }
