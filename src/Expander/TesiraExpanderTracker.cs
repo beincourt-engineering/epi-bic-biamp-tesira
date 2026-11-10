@@ -23,13 +23,30 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Expander
         public Dictionary<int, StringFeedback> MacAddresses = new Dictionary<int, StringFeedback>();
         public Dictionary<int, BoolFeedback> OnlineStatuses = new Dictionary<int, BoolFeedback>();
 
+        /// <summary>
+        /// The expanders taken together: OK while the DSP reports every configured expander, a
+        /// warning while it is missing some and an error while it is missing all, with the missing
+        /// ones named in the message. Unknown until each has reported or timed out.
+        /// </summary>
         public StatusMonitorBase CommunicationMonitor { get; private set; }
+
+        private readonly TesiraExpanderMonitor expanderMonitor;
+        private readonly object statusLock = new object();
+
+        /// <summary>
+        /// How often the DSP is asked which expanders it sees. Each answer restarts the reported
+        /// expanders' countdowns to offline, so this must stay well inside them.
+        /// </summary>
+        private const double PollIntervalMs = 45000;
+
+        private System.Timers.Timer pollTimer;
 
 
         public TesiraExpanderTracker(TesiraDsp parent, Dictionary<string, TesiraExpanderBlockConfig> expanders)
             : base("", "", 0, 0, parent, string.Format(keyFormatter, parent.Key, "Expanders"), "Expanders", 0)
         {
-            CommunicationMonitor = new GenericCommunicationMonitor(this, Parent.Communication, 45000, 90000, 180000, CheckTracker);
+            expanderMonitor = new TesiraExpanderMonitor(this, 90000, 180000);
+            CommunicationMonitor = expanderMonitor;
 
             foreach (var tesiraExpanderBlockConfig in expanders)
             {
@@ -37,11 +54,14 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Expander
                 var value = tesiraExpanderBlockConfig.Value.Hostname;
                 var expander = new TesiraExpanderData(value, key, this, CheckTracker);
                 Expanders.Add(expander);
-                var h = new StringFeedback("hostName", () => expander.Hostname);
-                var s = new StringFeedback("serialNumber", () => expander.SerialNumber);
-                var f = new StringFeedback("firmware", () => expander.Firmware);
-                var m = new StringFeedback("macAddress", () => expander.MacAddress);
-                var o = new BoolFeedback("online", () => expander.Online);
+
+                // Feedback keys carry the expander's index: FeedbackCollection rejects a repeated
+                // key, and every expander's feedbacks are on this one list.
+                var h = new StringFeedback(FeedbackKey(key, "hostName"), () => expander.Hostname);
+                var s = new StringFeedback(FeedbackKey(key, "serialNumber"), () => expander.SerialNumber);
+                var f = new StringFeedback(FeedbackKey(key, "firmware"), () => expander.Firmware);
+                var m = new StringFeedback(FeedbackKey(key, "macAddress"), () => expander.MacAddress);
+                var o = new BoolFeedback(FeedbackKey(key, "online"), () => expander.Online);
 
                 Hostnames.Add(key, h);
                 SerialNumbers.Add(key, s);
@@ -55,46 +75,73 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Expander
                 Feedbacks.Add(m);
                 Feedbacks.Add(o);
 
+                expander.Monitor.StatusChange += (sender, args) =>
+                {
+                    o.FireUpdate();
+                    UpdateStatus();
+                };
+
                 DeviceManager.AddDevice(expander);
 
             }
             this.LogVerbose("There are {count} configured expanders", Expanders.Count);
 
-
-            foreach (var f in Hostnames.Select(feedback => feedback.Value))
-            {
-                Feedbacks.Add(f);
-            }
-
-            foreach (var f in SerialNumbers.Select(feedback => feedback.Value))
-            {
-                Feedbacks.Add(f);
-            }
-
-            foreach (var f in Firmwares.Select(feedback => feedback.Value))
-            {
-                Feedbacks.Add(f);
-            }
-
-            foreach (var f in MacAddresses.Select(feedback => feedback.Value))
-            {
-                Feedbacks.Add(f);
-            }
-
-            foreach (var f in OnlineStatuses.Select(feedback => feedback.Value))
-            {
-                Feedbacks.Add(f);
-            }
-
             foreach (var item in Expanders)
             {
                 this.LogVerbose("Expander Index = {index} ; Expander Hostname = {hostname}", item.Index, item.Hostname);
             }
+
+            UpdateStatus();
+        }
+
+        private string FeedbackKey(int index, string name)
+        {
+            return string.Format("{0}-{1}-{2}", Key, index, name);
         }
 
         protected override void Initialize()
         {
             CheckTracker();
+
+            // Ask on a timer whatever the transport, and count each expander from now, so one the
+            // DSP never reports goes offline instead of staying unknown.
+            foreach (var expander in Expanders)
+            {
+                expander.StartMonitoring();
+            }
+
+            pollTimer = new System.Timers.Timer(PollIntervalMs) { AutoReset = true };
+            pollTimer.Elapsed += (sender, e) =>
+            {
+                if (Parent.Communication.IsConnected)
+                    CheckTracker();
+            };
+            pollTimer.Start();
+        }
+
+        /// <summary>
+        /// Sets this tracker's status from the expanders' own.
+        /// </summary>
+        private void UpdateStatus()
+        {
+            lock (statusLock)
+            {
+                var missing = Expanders
+                    .Where(e => e.Monitor.Status == MonitorStatus.InError)
+                    .Select(e => e.Name)
+                    .ToList();
+
+                if (missing.Count == 0)
+                {
+                    var waiting = Expanders.Any(e => e.Monitor.Status == MonitorStatus.StatusUnknown);
+                    expanderMonitor.SetStatus(waiting ? MonitorStatus.StatusUnknown : MonitorStatus.IsOk, null);
+                    return;
+                }
+
+                expanderMonitor.SetStatus(
+                    missing.Count == Expanders.Count ? MonitorStatus.InError : MonitorStatus.InWarning,
+                    "Expanders not reported by the DSP: " + string.Join(", ", missing));
+            }
         }
 
 
@@ -121,23 +168,33 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Expander
             this.LogVerbose("There are {matchCount} Matches", matches.Count);
             for (var v = 0; v < matches.Count; v++)
             {
-                if (!matches[v].ToString().Contains('"')) continue;
-                this.LogVerbose("Match {matchIndex} is a device", v);
+                // This runs while the command queue waits on this reply: an entry that does not
+                // parse is logged and skipped, so it cannot hold up the queue or the other entries.
+                try
+                {
+                    if (!matches[v].ToString().Contains('"')) continue;
+                    this.LogVerbose("Match {matchIndex} is a device", v);
 
-                var matchesEnclosed = regex2.Matches(matches[v].ToString());
-                var data2 = regex2.Replace(matches[v].ToString(), "").Trim('"').Trim('[').Trim().Replace("  ", " ");
-                Console.WriteLine("Data2 = {0}", data2);
-                var hostname = matchesEnclosed[0].ToString().Trim('"');
+                    var matchesEnclosed = regex2.Matches(matches[v].ToString());
+                    var data2 = regex2.Replace(matches[v].ToString(), "").Trim('"').Trim('[').Trim().Replace("  ", " ");
+                    Console.WriteLine("Data2 = {0}", data2);
+                    var hostname = matchesEnclosed[0].ToString().Trim('"');
 
-                this.LogVerbose("Match {matchIndex} Hostname : {hostname}", v, hostname);
+                    this.LogVerbose("Match {matchIndex} Hostname : {hostname}", v, hostname);
 
-                var newData = Expanders.FirstOrDefault(o => String.Equals(o.Hostname, hostname, StringComparison.CurrentCultureIgnoreCase));
+                    var newData = Expanders.FirstOrDefault(o => String.Equals(o.Hostname, hostname, StringComparison.CurrentCultureIgnoreCase));
 
-                if (newData == null) continue;
-                this.LogVerbose("Found a device Index {deviceIndex} with Hostname {hostname}", newData.Index, newData.Hostname);
-                var macData = matches[v + 1].ToString();
-                var otherData = matches[v].ToString();
-                newData.SetData(otherData, macData);
+                    if (newData == null) continue;
+                    this.LogVerbose("Found a device Index {deviceIndex} with Hostname {hostname}", newData.Index, newData.Hostname);
+                    var macData = matches[v + 1].ToString();
+                    var otherData = matches[v].ToString();
+                    newData.SetData(otherData, macData);
+                }
+                catch (Exception ex)
+                {
+                    this.LogError("Could not parse expander entry {matchIndex} in '{message}': {error}", v, message, ex.Message);
+                    this.LogVerbose(ex, "Stack trace:");
+                }
             }
 
             foreach (var feedback in Feedbacks)

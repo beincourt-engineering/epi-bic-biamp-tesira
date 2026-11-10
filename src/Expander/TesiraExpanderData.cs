@@ -9,9 +9,17 @@ using PepperDash.Essentials.Core.DeviceInfo;
 
 namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Expander
 {
-  public class TesiraExpanderData : IDeviceInfoProvider, IKeyName, IOnline
+  public class TesiraExpanderData : IDeviceInfoProvider, IKeyName, IOnline, ICommunicationMonitor
   {
-    private System.Timers.Timer expanderTimer;
+    /// <summary>
+    /// How long the DSP may go without reporting this expander before it counts as offline. The
+    /// tracker asks every 45 seconds, so one missed answer is not enough.
+    /// </summary>
+    private const double OfflineAfterMs = 120000;
+
+    // One-shot: each report restarts it, and if it runs out the expander is offline.
+    private readonly System.Timers.Timer expanderTimer;
+    private readonly object stateLock = new object();
 
     public DeviceInfo DeviceInfo { get; private set; }
     public event DeviceInfoChangeHandler DeviceInfoChanged;
@@ -29,6 +37,15 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Expander
     public string Key { get; private set; }
     public string Name { get; private set; }
     public TesiraExpanderMonitor Monitor;
+
+    /// <summary>
+    /// Unknown until monitoring starts and the DSP first reports this expander; OK while it keeps
+    /// reporting it; in error once it has not for <see cref="OfflineAfterMs"/>.
+    /// </summary>
+    public StatusMonitorBase CommunicationMonitor
+    {
+      get { return Monitor; }
+    }
 
     private const string expanderPattern = "\\\"([^\\\"\\\"]+)\\\"?";
     private static readonly Regex expanderRegex = new Regex(expanderPattern);
@@ -51,14 +68,41 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Expander
       Monitor = new TesiraExpanderMonitor(this, 180000, 360000);
       DeviceInfo = new DeviceInfo();
       Monitor.Start();
+
+      expanderTimer = new System.Timers.Timer(OfflineAfterMs) { AutoReset = false };
+      expanderTimer.Elapsed += (sender, e) => SetOffline();
     }
 
+    /// <summary>
+    /// Starts the countdown to offline if no report has started it, so an expander the DSP never
+    /// reports ends up offline rather than unknown. Called once the tracker starts asking.
+    /// </summary>
+    internal void StartMonitoring()
+    {
+      lock (stateLock)
+      {
+        if (!expanderTimer.Enabled)
+          expanderTimer.Start();
+      }
+    }
 
     private void SetOffline()
     {
-      expanderTimer = null;
-      Online = false;
-      Monitor.IsOnline = Online;
+      lock (stateLock)
+      {
+        // A report restarted the countdown as it ran out: that report wins.
+        if (expanderTimer.Enabled) return;
+
+        SetOnline(false);
+      }
+    }
+
+    private void SetOnline(bool online)
+    {
+      Online = online;
+      IsOnline.FireUpdate();
+      Monitor.SetStatus(online ? MonitorStatus.IsOk : MonitorStatus.InError,
+        online ? null : string.Format("Not reported by the DSP for {0} seconds", OfflineAfterMs / 1000));
     }
 
     public void SetData(string data, string macData)
@@ -74,26 +118,19 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Expander
 
       MacAddress = FormatMac(macData);
 
-      Online = true;
-
-      if (expanderTimer == null)
-      {
-        expanderTimer = new System.Timers.Timer(120000);
-        expanderTimer.Elapsed += (sender, e) => SetOffline();
-        expanderTimer.AutoReset = true;
-        expanderTimer.Start();
-        return;
-      }
-
-      expanderTimer.Stop();
-      expanderTimer.Interval = 120000;
-      expanderTimer.Start();
       DeviceInfo.HostName = Hostname;
       DeviceInfo.SerialNumber = SerialNumber;
       DeviceInfo.FirmwareVersion = Firmware;
       DeviceInfo.MacAddress = MacAddress;
 
-      Monitor.IsOnline = Online;
+      lock (stateLock)
+      {
+        expanderTimer.Stop();
+        expanderTimer.Start();
+
+        SetOnline(true);
+      }
+
       OnDeviceInfoChanged();
     }
 
