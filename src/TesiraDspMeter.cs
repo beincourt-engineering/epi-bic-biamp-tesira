@@ -70,7 +70,9 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             Feedbacks.Add(SubscribedFeedback);
             Feedbacks.Add(NameFeedback);
 
-            parent.Feedbacks.AddRange(Feedbacks);
+            // Not added to the parent DSP's Feedbacks: a meter changes with the audio, and
+            // monitoring consumers read the DSP's IHasFeedback as its state. The meter keeps its own
+            // list, and both bridges link MeterFeedback directly.
 
             if (config.MeterData != null)
             {

@@ -121,9 +121,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             MakeFeedback = new StringFeedback("make", () => Make);
             ModelFeedback = new StringFeedback("model", () => Model);
 
+            // The parent's CommandPassthruFeedback is not listed: it changes on every line the DSP
+            // sends. LinkToApi links it to the bridge directly.
             Feedbacks.Add(NameFeedback);
             Feedbacks.Add(Parent.CommunicationMonitor.IsOnlineFeedback);
-            Feedbacks.Add(Parent.CommandPassthruFeedback);
             Feedbacks.Add(IpAddressFeedback);
             Feedbacks.Add(HostnameFeedback);
             Feedbacks.Add(SerialNumberFeedback);

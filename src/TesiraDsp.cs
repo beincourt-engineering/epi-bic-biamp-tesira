@@ -245,7 +245,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             CommunicationMonitor.StatusChange += CommunicationMonitor_StatusChange;
 
             Feedbacks.Add(CommunicationMonitor.IsOnlineFeedback);
-            Feedbacks.Add(CommandPassthruFeedback);
+
+            // CommandPassthruFeedback stays off Feedbacks: it changes on every line the DSP sends,
+            // and monitoring consumers read IHasFeedback as the device's state. The bridge links it
+            // directly in LinkToApi.
 
             CreateDspObjects();
         }
