@@ -116,6 +116,71 @@ public class TesiraDeviceInfoParserTests
         TesiraDeviceInfoParser.NetworkStatus(reply).Should().BeNull();
     }
 
+    // deviceInfo returns deviceModel, deviceRevision, serialNumber, firmwareVersion and ipAddress,
+    // in that order (Tesira Text Protocol DEVICE attribute table). No example reply is published, so
+    // these are built from that order in both session styles.
+    private const string VerboseDeviceInfo =
+        "+OK \"value\":{\"deviceModel\":\"TesiraFORTE X 1600\" \"deviceRevision\":\"1\" " +
+        "\"serialNumber\":\"04223456\" \"firmwareVersion\":\"5.7.1.4\" \"ipAddress\":\"192.0.2.10\"}";
+
+    private const string DeviceInfo =
+        "+OK {\"TesiraFORTE X 1600\" \"1\" \"04223456\" \"5.7.1.4\" \"192.0.2.10\"}";
+
+    [Theory]
+    [InlineData(VerboseDeviceInfo)]
+    [InlineData(DeviceInfo)]
+    [InlineData(DeviceInfo + "\r")]
+    public void Reads_the_model_in_either_style(string reply)
+    {
+        TesiraDeviceInfoParser.Model(reply, null).Should().Be("TesiraFORTE X 1600");
+        TesiraDeviceInfoParser.Model(reply, "04223456").Should().Be("TesiraFORTE X 1600");
+    }
+
+    [Theory]
+    [InlineData("+OK \"value\":{\"deviceModel\":TESIRAFORTE_X_1600 \"serialNumber\":\"04223456\"}")]
+    [InlineData("+OK {TESIRAFORTE_X_1600 \"1\" \"04223456\" \"5.7.1.4\" \"192.0.2.10\"}")]
+    public void Reads_a_model_sent_as_a_bare_word(string reply)
+    {
+        TesiraDeviceInfoParser.Model(reply, "04223456").Should().Be("TESIRAFORTE_X_1600");
+    }
+
+    [Fact]
+    public void A_reply_without_the_known_serial_is_not_this_dsp_s_model()
+    {
+        // A late reply from another command, or a serial misread: never take it as the model.
+        TesiraDeviceInfoParser.Model(DeviceInfo, "09999999").Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("+OK \"5.7.1.4\"")]
+    [InlineData("+OK \"04223456\"")]
+    [InlineData("+OK \"TesiraForte\"")]
+    [InlineData(NetworkStatus)]
+    [InlineData(VerboseNetworkStatus)]
+    [InlineData(DiscoveredServers)]
+    [InlineData("+OK -12.000000")]
+    [InlineData("+OK true")]
+    [InlineData("+OK {\"192.0.2.10\" \"1\"}")]
+    [InlineData("+OK {\"5.7.1.4\" \"1\"}")]
+    [InlineData("+OK {2 \"1\"}")]
+    [InlineData("+OK \"value\":{\"deviceRevision\":\"1\"}")]
+    [InlineData("-ERR address not found: {\"deviceId\":0 \"classCode\":0 \"instanceNum\":0}")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void Another_attribute_s_reply_is_not_a_model(string? reply)
+    {
+        TesiraDeviceInfoParser.Model(reply!, null).Should().BeNull();
+    }
+
+    [Fact]
+    public void A_device_info_reply_is_not_taken_as_another_attribute()
+    {
+        TesiraDeviceInfoParser.Serial(DeviceInfo).Should().BeNull();
+        TesiraDeviceInfoParser.Firmware(DeviceInfo).Should().BeNull();
+        TesiraDeviceInfoParser.NetworkStatus(DeviceInfo).Should().BeNull();
+        TesiraDeviceInfoParser.NetworkStatus(VerboseDeviceInfo).Should().BeNull();
+    }
+
     [Fact]
     public void Value_reads_either_style()
     {

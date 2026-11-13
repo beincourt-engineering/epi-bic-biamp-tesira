@@ -167,6 +167,113 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         }
 
         /// <summary>
+        /// The model from a <c>deviceInfo</c> reply, e.g. <c>TesiraFORTE X 1600</c>. Null when the
+        /// reply isn't one.
+        /// </summary>
+        /// <remarks>
+        /// The attribute returns deviceModel, deviceRevision, serialNumber, firmwareVersion and
+        /// ipAddress, in that order. Verbose, the model is the <c>deviceModel</c> field. Non-verbose,
+        /// it is the first value of the reply's object, quoted or not.
+        ///
+        /// Refused: anything not an object, an object holding a MAC address (a networkStatus
+        /// reply), and a model that looks like an address or a version. When the serial number is
+        /// already known, the reply must also carry it, so a reply that landed on the wrong command
+        /// is never taken as the model.
+        /// </remarks>
+        /// <param name="reply">The line the DSP sent.</param>
+        /// <param name="knownSerial">The DSP's serial number when already read, else null.</param>
+        public static string Model(string reply, string knownSerial)
+        {
+            if (string.IsNullOrEmpty(reply))
+            {
+                return null;
+            }
+
+            reply = reply.Trim();
+            if (!reply.StartsWith(Ok, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var strings = QuotedString.Matches(reply);
+            foreach (Match s in strings)
+            {
+                if (MacShape.IsMatch(s.Groups[1].Value))
+                {
+                    return null;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(knownSerial) && reply.IndexOf(knownSerial, StringComparison.Ordinal) < 0)
+            {
+                return null;
+            }
+
+            string model;
+            if (reply.IndexOf(ValueKey, StringComparison.Ordinal) >= 0)
+            {
+                model = Field(reply, "deviceModel") ?? BareField(reply, "deviceModel");
+            }
+            else
+            {
+                var open = reply.IndexOf('{');
+                if (open < 0 || reply.Substring(Ok.Length, open - Ok.Length).Trim().Length > 0)
+                {
+                    return null;
+                }
+
+                model = FirstValue(reply.Substring(open + 1));
+            }
+
+            if (model == null)
+            {
+                return null;
+            }
+
+            model = model.Trim();
+            if (model.Length == 0 || model.Length > 64 || Ipv4Shape.IsMatch(model) || VersionShape.IsMatch(model))
+            {
+                return null;
+            }
+
+            foreach (var c in model)
+            {
+                if (char.IsLetter(c))
+                {
+                    return model;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>The first value in an object's body: a quoted string, or a bare word.</summary>
+        private static string FirstValue(string body)
+        {
+            body = body.TrimStart();
+            if (body.Length == 0)
+            {
+                return null;
+            }
+
+            if (body[0] == '"')
+            {
+                var end = body.IndexOf('"', 1);
+                return end < 0 ? null : body.Substring(1, end - 1);
+            }
+
+            var word = Regex.Match(body, "^[A-Za-z0-9_.\\-]+");
+            return word.Success ? word.Value : null;
+        }
+
+        /// <summary>An unquoted field, e.g. <c>"deviceModel":TESIRAFORTE_X_1600</c>.</summary>
+        private static string BareField(string reply, string name)
+        {
+            var match = Regex.Match(reply, "\"" + Regex.Escape(name) + "\"\\s*:\\s*([A-Za-z0-9_.\\-]+)");
+            return match.Success ? match.Groups[1].Value : null;
+        }
+
+        /// <summary>
         /// The first string field with this name anywhere in a verbose reply, e.g.
         /// <c>"hostname":"TesiraForte"</c>. Null when the field is absent or empty.
         /// </summary>

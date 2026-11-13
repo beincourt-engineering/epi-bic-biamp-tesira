@@ -20,9 +20,17 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// Feedback Collection for Component
         /// </summary>
 
-        public DeviceInfo DeviceInfo { get; private set; }
+        /// <summary>
+        /// A <see cref="TesiraDspDeviceIdentity"/>, so the model travels with the rest of the
+        /// device info.
+        /// </summary>
+        public DeviceInfo DeviceInfo { get { return identity; } }
+
+        private readonly TesiraDspDeviceIdentity identity = new TesiraDspDeviceIdentity();
 
         public const string Make = "Biamp";
+
+        /// <summary>The model the DSP reports for itself, e.g. TesiraFORTE X 1600.</summary>
         public string Model { get; private set; }
 
         public event DeviceInfoChangeHandler DeviceInfoChanged;
@@ -105,8 +113,6 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         public TesiraDspDeviceInfo(TesiraDsp parent)
             : base("DEVICE", "DEVICE", 0, 0, parent, string.Format(keyFormatter, parent.Key, "DeviceInfo"), "DeviceInfo", 0)
         {
-
-            DeviceInfo = new DeviceInfo();
             Init();
         }
 
@@ -168,8 +174,11 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         {
             get
             {
+                // Firmware without deviceInfo never names a model, so the model is only waited
+                // for through the fast retries.
                 return !string.IsNullOrEmpty(SerialNumber) && !string.IsNullOrEmpty(Firmware)
-                    && !string.IsNullOrEmpty(MacAddress);
+                    && !string.IsNullOrEmpty(MacAddress)
+                    && (!string.IsNullOrEmpty(Model) || retries >= FastRetries);
             }
         }
 
@@ -178,7 +187,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             GetFirmware();
             GetIpConfig();
             GetSerial();
-            GetServers();
+            // After the serial, so its reply can be checked against the serial already read.
+            GetModel();
 
             ScheduleRetry();
         }
@@ -237,15 +247,11 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             SendFullCommand("get", "version", null, 999);
         }
 
-        private void GetServers()
+        private void GetModel()
         {
-            this.LogVerbose("Getting Servers");
-            SendFullCommand("get", "discoveredServers", null, 999);
+            this.LogVerbose("Getting Model");
+            SendFullCommand("get", "deviceInfo", null, 999);
         }
-
-        private const string pattern = "([\"\'])(?:(?=(\\\\?))\\2.)*?\\1";
-
-        private static readonly Regex parseRegex = new Regex(pattern);
 
         public override void ParseGetMessage(string attributeCode, string message)
         {
@@ -324,85 +330,24 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                             break;
                         }
 
-                    case "discoveredServers":
+                    case "deviceInfo":
                         {
-                            try
+                            // Null when this isn't a deviceInfo reply, or it doesn't carry the
+                            // serial already read: a late reply lands on the wrong command.
+                            var model = TesiraDeviceInfoParser.Model(message, SerialNumber);
+                            if (model == null)
                             {
-                                // Extract the content between [[ and ]]
-                                var startIndex = message.IndexOf("[[", StringComparison.Ordinal);
-                                var endIndex = message.LastIndexOf("]]", StringComparison.Ordinal);
-
-                                if (startIndex == -1 || endIndex == -1)
-                                {
-                                    this.LogWarning("Could not find array markers in discoveredServers response: {message}", message);
-                                    break;
-                                }
-
-                                var arrayContent = message.Substring(startIndex + 2, endIndex - startIndex - 2);
-                                this.LogDebug("Extracted array content: {arrayContent}", arrayContent);
-
-                                // Split by "] [" to separate multiple device entries
-                                var deviceEntries = arrayContent.Split(new[] { "] [" }, StringSplitOptions.RemoveEmptyEntries);
-
-                                this.LogDebug("Found {count} device entries", deviceEntries.Length);
-
-                                foreach (var deviceEntry in deviceEntries)
-                                {
-                                    // Clean up the entry (remove any remaining brackets)
-                                    var cleanEntry = deviceEntry.Trim('[', ']');
-                                    this.LogDebug("Processing device entry: {entry}", cleanEntry);
-
-                                    // Use regex to parse the individual entry
-                                    var deviceMatches = parseRegex.Matches(cleanEntry);
-
-                                    if (deviceMatches.Count >= 2)
-                                    {
-                                        var serverIp = deviceMatches[0].Value.Trim('"');
-                                        var serverHostname = deviceMatches[1].Value.Trim('"');
-
-                                        this.LogDebug("Found device - IP: {serverIp}, Hostname: {serverHostname}", serverIp, serverHostname);
-
-                                        // Check if this device matches our IP address
-                                        if (!string.Equals(serverIp, IpAddress, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            continue;
-                                        }
-
-                                        this.LogDebug("Found matching server. Hostname: {serverHostname}", serverHostname);
-
-                                        // Extract deviceType by splitting on spaces and finding numeric values
-                                        // Format: "10.11.50.192" "nycd-tesira01" false 1 18
-                                        var parts = cleanEntry.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                                        this.LogDebug("Split entry into {count} parts: {parts}", parts.Length, string.Join(", ", parts));
-
-                                        // Look for the last numeric value (deviceType)
-                                        for (int i = parts.Length - 1; i >= 0; i--)
-                                        {
-                                            var part = parts[i].Trim();
-                                            if (int.TryParse(part, out var deviceType))
-                                            {
-                                                Model = deviceType.ToString();
-                                                this.LogVerbose("Set model to deviceType: {model}", Model);
-                                                break;
-                                            }
-                                        }
-
-                                        break; // Found our device, no need to continue
-                                    }
-                                    else
-                                    {
-                                        this.LogWarning("Expected at least 2 matches for device entry, got {count}: {entry}", deviceMatches.Count, cleanEntry);
-                                    }
-                                }
-
-                                ModelFeedback.FireUpdate();
-                                MakeFeedback.FireUpdate();
-                                OnDeviceInfoChanged();
+                                this.LogDebug("Not a deviceInfo reply, ignored: {message}", message);
+                                break;
                             }
-                            catch (Exception ex)
-                            {
-                                this.LogError(ex, "Error parsing discoveredServers response: {message}", message);
-                            }
+
+                            Model = model;
+                            identity.Model = model;
+                            this.LogDebug("Parsed Model: {model}", Model);
+
+                            ModelFeedback.FireUpdate();
+                            MakeFeedback.FireUpdate();
+                            OnDeviceInfoChanged();
                             break;
                         }
 
