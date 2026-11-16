@@ -121,6 +121,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
         private TesiraExpanderTracker ExpanderTracker { get; set; }
 
+        private TesiraDanteMonitor DanteMonitor { get; set; }
+
         private bool initalSubscription = true;
 
         private readonly object watchdogLock = new object();
@@ -384,6 +386,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
             CreateDevInfo();
 
+            CreateDanteMonitor();
+
             //Keep me at the end of this method!
             CreateExpanderTracker(props);
 
@@ -414,6 +418,21 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             Feedbacks.Add(DevInfo.HostnameFeedback);
             Feedbacks.Add(DevInfo.IpAddressFeedback);
             Feedbacks.Add(DevInfo.MacAddressFeedback);
+        }
+
+        /// <summary>
+        /// The Dante interface and active faults, read for monitoring. Its feedbacks go on the DSP's own
+        /// list, so a reader of the DSP's feedbacks sees them.
+        /// </summary>
+        private void CreateDanteMonitor()
+        {
+            DanteMonitor = new TesiraDanteMonitor(this);
+            DeviceManager.AddDevice(DanteMonitor);
+
+            foreach (var feedback in DanteMonitor.Feedbacks)
+            {
+                Feedbacks.Add(feedback);
+            }
         }
 
         private void CreatePresets(TesiraDspPropertiesConfig props)
@@ -1273,6 +1292,9 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
             // Queue expander initialization if available
             ExpanderTracker?.CheckTracker();
+
+            // The Dante interface and the fault list, at the lowest priority
+            DanteMonitor?.AskAll();
 
             // Queue all min level requests
             var volumeComponents = ControlPointList.OfType<IVolumeComponent>().ToList();

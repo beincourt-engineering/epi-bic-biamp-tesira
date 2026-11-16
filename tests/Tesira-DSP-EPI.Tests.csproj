@@ -28,5 +28,6 @@
   <ItemGroup>
     <!-- Free of Crestron types, so compiled in directly and exercised, unlike the plugin DLL. -->
     <Compile Include="..\src\TesiraDeviceInfoParser.cs" Link="TesiraDeviceInfoParser.cs" />
+    <Compile Include="..\src\TesiraDanteParser.cs" Link="TesiraDanteParser.cs" />
   </ItemGroup>
 </Project>
