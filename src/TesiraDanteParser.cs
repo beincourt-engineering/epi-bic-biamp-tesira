@@ -202,10 +202,13 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         public bool Receive { get; set; }
 
         /// <summary>
-        /// Whether the DSP raises a fault when this channel goes inactive. Set per receive channel in the
-        /// design, for the channels that should always carry audio.
+        /// Whether the DSP raises a fault when this channel goes inactive. Set per channel in the design,
+        /// for the channels that should always carry audio.
         /// </summary>
         public bool FaultOnInactive { get; set; }
+
+        /// <summary>How many Dante flows the channel is in; 0 means nothing is subscribed. Null when not reported.</summary>
+        public int? FlowCount { get; set; }
     }
 
     /// <summary>What <c>DEVICE get danteInfo</c> says about the DSP's Dante interface.</summary>
@@ -233,7 +236,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         public string Id { get; set; }
         public string Name { get; set; }
 
-        /// <summary>The indicator of the device entry the fault was listed under.</summary>
+        /// <summary>The fault's instance, such as <c>DEFAULT</c>, when the reply gives one.</summary>
+        public string Instance { get; set; }
+
+        /// <summary>The indicator of the entry the fault was listed under.</summary>
         public string Indicator { get; set; }
     }
 
@@ -251,20 +257,25 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     /// each reader checks the reply has its attribute's shape and returns null for anything else, because
     /// replies are matched to commands by order alone and a late one lands on the wrong command.
     /// </summary>
+    /// <remarks>
+    /// A verbose session writes a record as <c>{"name":value ...}</c>; a non-verbose one drops the names
+    /// and writes the record as a list, <c>[value ...]</c>, and an enum value as its number. Records are
+    /// read in either bracket.
+    /// </remarks>
     public static class TesiraDanteParser
     {
         /// <summary>
         /// A <c>danteInfo</c> reply. The attribute holds, in order: revs, netCfg, allNetStatus,
         /// preferredDanteNetworkClockSource, networkClockSlaveOnly, networkLatencyInMicroseconds and chInfos,
-        /// each channel being name, number, txrx and faultOnInactive. Null when the reply isn't one.
+        /// each channel being name, number, txrx, faultOnInactive and flowCount. Null when the reply isn't one.
         /// </summary>
         public static TesiraDanteInfo DanteInfo(string reply)
         {
             var root = TtpValue.Parse(reply);
-            if (root == null || root.Kind != TtpNode.NodeKind.Object) return null;
+            if (root == null || !root.IsContainer) return null;
 
             var channels = root.Get("chInfos", 6);
-            if (channels == null || channels.Kind != TtpNode.NodeKind.Array) return null;
+            if (channels == null || !channels.IsContainer) return null;
 
             var info = new TesiraDanteInfo
             {
@@ -275,16 +286,20 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
             foreach (var ch in channels.Items)
             {
-                if (ch.Kind != TtpNode.NodeKind.Object) return null;
+                if (!ch.IsContainer) return null;
                 var name = ch.Get("name", 0)?.AsText();
                 var number = ch.Get("number", 1)?.AsInt();
                 var txrx = ch.Get("txrx", 2)?.AsText();
                 var fault = ch.Get("faultOnInactive", 3)?.AsBool();
+                var flows = ch.Get("flowCount", 4)?.AsInt();
                 var receive = string.Equals(txrx, "RX", StringComparison.OrdinalIgnoreCase);
                 if (name == null || number == null || (!receive && !string.Equals(txrx, "TX", StringComparison.OrdinalIgnoreCase)))
                     return null;
 
-                info.Channels.Add(new TesiraDanteChannel { Number = number.Value, Name = name, Receive = receive, FaultOnInactive = fault == true });
+                info.Channels.Add(new TesiraDanteChannel
+                {
+                    Number = number.Value, Name = name, Receive = receive, FaultOnInactive = fault == true, FlowCount = flows,
+                });
             }
 
             return info;
@@ -297,9 +312,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         }
 
         /// <summary>
-        /// An <c>activeFaultList</c> reply: one entry per device in the system, each an indicator
-        /// (<c>INDICATOR_...</c>), its name, the faults under it (each an id and a name) and the device's
-        /// serial number. Null when the reply isn't one.
+        /// An <c>activeFaultList</c> reply: a list of indicator entries (in the device, in the system), each
+        /// an indicator id, its name, the faults under it (each an id, a name and an instance) and the
+        /// device's serial number. A verbose reply gives the ids as words (<c>INDICATOR_MAJOR_IN_DEVICE</c>,
+        /// <c>FAULT_DANTE_FLOW_INACTIVE</c>), a non-verbose one as numbers. Null when the reply isn't one.
         /// </summary>
         public static TesiraFaultList FaultList(string reply)
         {
@@ -307,34 +323,40 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             if (root == null || root.Kind != TtpNode.NodeKind.Array) return null;
 
             var list = new TesiraFaultList { Level = "ok" };
+            TesiraFault worst = null;
             foreach (var entry in root.Items)
             {
-                if (entry.Kind != TtpNode.NodeKind.Object) return null;
-                var indicator = entry.Get("id", 0)?.AsText();
-                if (indicator == null || !indicator.StartsWith("INDICATOR_", StringComparison.Ordinal)) return null;
-
-                var level = LevelOf(indicator);
-                if (Worse(level, list.Level)) list.Level = level;
-
+                if (!entry.IsContainer) return null;
+                var idNode = entry.Get("id", 0);
+                var indicator = idNode?.AsText();
+                var entryName = entry.Get("name", 1)?.AsText();
                 var faults = entry.Get("faults", 2);
-                var listed = 0;
-                if (faults != null && faults.Kind == TtpNode.NodeKind.Array)
+                if (indicator == null || entryName == null || faults == null || !faults.IsContainer) return null;
+
+                var named = indicator.StartsWith("INDICATOR_", StringComparison.Ordinal);
+                if (!named && idNode.AsInt() == null) return null;
+
+                var level = named ? LevelOf(indicator) : LevelOfName(entryName);
+                if (Worse(level, list.Level))
                 {
-                    foreach (var f in faults.Items)
-                    {
-                        if (f.Kind != TtpNode.NodeKind.Object) continue;
-                        var id = f.Get("id", 0)?.AsText();
-                        var name = f.Get("name", 1)?.AsText();
-                        if (id == null && name == null) continue;
-                        list.Faults.Add(new TesiraFault { Id = id, Name = name, Indicator = indicator });
-                        listed++;
-                    }
+                    list.Level = level;
+                    worst = new TesiraFault { Id = indicator, Name = entryName, Indicator = indicator };
                 }
 
-                // An entry that is in fault but lists nothing under it still says what is wrong in its name.
-                if (listed == 0 && level != "ok")
-                    list.Faults.Add(new TesiraFault { Id = indicator, Name = entry.Get("name", 1)?.AsText(), Indicator = indicator });
+                foreach (var f in faults.Items)
+                {
+                    if (!f.IsContainer) continue;
+                    var id = f.Get("id", 0)?.AsText();
+                    var name = f.Get("name", 1)?.AsText();
+                    if (id == null && name == null) continue;
+                    list.Faults.Add(new TesiraFault { Id = id, Name = name, Instance = f.Get("instance", 2)?.AsText(), Indicator = indicator });
+                }
             }
+
+            // In fault with nothing listed under any entry: the worst entry's own name still says what is wrong.
+            // A system entry with no faults of its own is only echoing a device entry's, so it adds nothing then.
+            if (list.Faults.Count == 0 && worst != null && list.Level != "ok")
+                list.Faults.Add(worst);
 
             return list;
         }
@@ -346,6 +368,19 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             if (indicator.IndexOf("_NONE", StringComparison.Ordinal) >= 0) return "ok";
             if (indicator.IndexOf("_MINOR", StringComparison.Ordinal) >= 0) return "warning";
             return "fault";
+        }
+
+        /// <summary>
+        /// The level from an indicator's name, for a non-verbose reply whose ids are numbers:
+        /// "No fault..." is ok, "Minor..." a warning, "Major..." or "Critical..." a fault, else unknown.
+        /// </summary>
+        public static string LevelOfName(string name)
+        {
+            var text = (name ?? "").ToLowerInvariant();
+            if (text.Contains("no fault") || text.Contains("none")) return "ok";
+            if (text.Contains("minor")) return "warning";
+            if (text.Contains("major") || text.Contains("critical")) return "fault";
+            return "unknown";
         }
 
         private static readonly string[] Order = { "ok", "unknown", "warning", "fault" };
@@ -373,10 +408,19 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     {
         public const int MaxValueChars = 2000;
 
-        /// <summary>The Dante interface as the <c>dante</c> feedback carries it.</summary>
+        /// <summary>
+        /// The Dante interface as the <c>dante</c> feedback carries it. <c>watched</c> lists each channel set
+        /// to fault when inactive as <c>[number, name, "rx" or "tx", flowCount]</c>, receive channels first;
+        /// a flowCount of 0 means nothing is subscribed to it, and that alone raises the DSP's Dante fault.
+        /// </summary>
         public static string DanteJson(TesiraDanteInfo info)
         {
-            var watched = info.Receive.Where(c => c.FaultOnInactive).Select(c => new object[] { c.Number, c.Name }).ToList();
+            var watched = info.Channels
+                .Where(c => c.FaultOnInactive)
+                .OrderBy(c => c.Receive ? 0 : 1)
+                .ThenBy(c => c.Number)
+                .Select(c => new object[] { c.Number, (c.Name ?? "").Trim(), c.Receive ? "rx" : "tx", c.FlowCount })
+                .ToList();
             var value = new Dictionary<string, object>
             {
                 { "present", true },
@@ -403,7 +447,9 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// <summary>The faults as the <c>activeFaults</c> feedback carries them.</summary>
         public static string FaultsJson(TesiraFaultList list)
         {
-            var faults = list.Faults.Select(f => new Dictionary<string, string> { { "id", f.Id }, { "name", f.Name } }).ToList();
+            var faults = list.Faults
+                .Select(f => new Dictionary<string, string> { { "id", f.Id }, { "name", f.Name }, { "instance", f.Instance } })
+                .ToList();
             var json = JsonConvert.SerializeObject(faults);
             while (json.Length > MaxValueChars && faults.Count > 0)
             {

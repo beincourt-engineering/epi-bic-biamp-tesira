@@ -17,9 +17,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     /// Feedbacks, all on the DSP's own list:
     /// <list type="bullet">
     /// <item><c>dante</c>: JSON. <c>{"present":false}</c> on a DSP without Dante, else the receive and
-    /// transmit channel counts, the clock settings and the receive channels set to fault when inactive,
-    /// which are the ones that should always carry audio.</item>
-    /// <item><c>activeFaults</c>: JSON list of the DSP's active faults, each its id and name.</item>
+    /// transmit channel counts, the clock settings and the channels set to fault when inactive, which are
+    /// the ones that should always carry audio, each with how many flows it is in. It is asked again
+    /// whenever the fault list changes.</item>
+    /// <item><c>activeFaults</c>: JSON list of the DSP's active faults, each its id, name and instance.</item>
     /// <item><c>HealthLevel</c> / <c>HealthIssues</c>: ok, warning or fault from the fault list, and the
     /// faults' names joined with "; ".</item>
     /// </list>
@@ -127,7 +128,11 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                             this.LogDebug("Not an activeFaultList reply, ignored: {message}", message);
                             break;
                         }
-                        Set(ref activeFaults, TesiraDanteValues.FaultsJson(faults), ActiveFaultsFeedback);
+                        var hadFaults = activeFaults != "";
+                        // A changed fault list may mean a flow came or went: ask for the channels' flow counts
+                        // now rather than at the next ten-minute poll.
+                        if (Set(ref activeFaults, TesiraDanteValues.FaultsJson(faults), ActiveFaultsFeedback) && hadFaults)
+                            AskDante();
                         Set(ref healthLevel, faults.Level, HealthLevelFeedback);
                         Set(ref healthIssues, TesiraDanteValues.Issues(faults), HealthIssuesFeedback);
                         break;
@@ -139,13 +144,14 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             }
         }
 
-        /// <summary>Fires only when the value changed.</summary>
-        private static void Set(ref string field, string value, StringFeedback feedback)
+        /// <summary>Fires only when the value changed; true when it did.</summary>
+        private static bool Set(ref string field, string value, StringFeedback feedback)
         {
             value = value ?? "";
-            if (field == value) return;
+            if (field == value) return false;
             field = value;
             feedback.FireUpdate();
+            return true;
         }
 
         public override void LinkToApi(BasicTriList trilist, uint joinStart, string joinMapKey, EiscApiAdvanced bridge)
