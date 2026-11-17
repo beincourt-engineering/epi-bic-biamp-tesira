@@ -27,6 +27,29 @@ public class DeviceIdentityMetadataTests
     }
 
     [Fact]
+    public void The_identity_carries_a_public_MacAddresses_list_of_strings()
+    {
+        // Telemetry reads a MacAddresses property of strings by name off the DeviceInfo it is handed.
+        var type = AssemblyFixture.PluginAssembly.GetType(IdentityType);
+        var macs = type!.GetProperty("MacAddresses");
+
+        macs.Should().NotBeNull();
+        macs!.PropertyType.FullName.Should().StartWith("System.Collections.Generic.List`1[[System.String");
+        macs.GetMethod!.IsPublic.Should().BeTrue();
+    }
+
+    [Fact]
+    public void The_component_lists_every_interface_mac_and_takes_the_dante_macs()
+    {
+        var source = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraDspDeviceInfo.cs"));
+
+        source.Should().Contain("interfaceMacs = status.MacAddresses;");
+        source.Should().Contain("TesiraDeviceInfoParser.MacList(interfaceMacs, dantePrimaryMac, danteSecondaryMac)");
+        source.Should().Contain("identity.MacAddresses = list;");
+        source.Should().Contain("public void SetDanteMacAddresses(string primary, string secondary)");
+    }
+
+    [Fact]
     public void The_component_hands_out_the_identity_and_fills_its_model()
     {
         var path = Path.Combine(AssemblyFixture.SourceDirectory, "TesiraDspDeviceInfo.cs");

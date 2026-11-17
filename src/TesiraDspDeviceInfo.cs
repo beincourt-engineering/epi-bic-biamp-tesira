@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Crestron.SimplSharp;
@@ -161,6 +162,49 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             OnDeviceInfoChanged();
         }
 
+        private readonly object macLock = new object();
+        private List<string> interfaceMacs;
+        private string dantePrimaryMac;
+        private string danteSecondaryMac;
+
+        /// <summary>
+        /// The Dante interface's MACs, from <c>DEVICE get danteInfo</c>; blank or null when a port has
+        /// none. They join the DSP's MAC list after its network interfaces' MACs.
+        /// </summary>
+        public void SetDanteMacAddresses(string primary, string secondary)
+        {
+            lock (macLock)
+            {
+                dantePrimaryMac = primary;
+                danteSecondaryMac = secondary;
+            }
+
+            if (ApplyMacList())
+            {
+                OnDeviceInfoChanged();
+            }
+        }
+
+        /// <summary>Rebuilds the identity's MAC list; true when it changed.</summary>
+        private bool ApplyMacList()
+        {
+            List<string> list;
+            lock (macLock)
+            {
+                list = TesiraDeviceInfoParser.MacList(interfaceMacs, dantePrimaryMac, danteSecondaryMac);
+            }
+
+            var old = identity.MacAddresses;
+            var same = old == null ? list == null : list != null && old.SequenceEqual(list);
+            if (same)
+            {
+                return false;
+            }
+
+            identity.MacAddresses = list;
+            return true;
+        }
+
         /// <summary>Asks again while anything is missing: every minute at first, then every ten.</summary>
         private const long RetryFastMs = 60000;
         private const long RetrySlowMs = 600000;
@@ -290,6 +334,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                             DeviceInfo.MacAddress = MacAddress;
                             DeviceInfo.IpAddress = IpAddress;
 
+                            lock (macLock)
+                            {
+                                interfaceMacs = status.MacAddresses;
+                            }
+
+                            ApplyMacList();
                             OnDeviceInfoChanged();
                             break;
                         }

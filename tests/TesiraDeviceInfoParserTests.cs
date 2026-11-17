@@ -116,6 +116,79 @@ public class TesiraDeviceInfoParserTests
         TesiraDeviceInfoParser.NetworkStatus(reply).Should().BeNull();
     }
 
+    // networkStatus as a DSP on firmware 5.7 sends it non-verbose (address and MAC made up): a list,
+    // the interfaces as [name [mac link source ip ...]].
+    private const string DspNetworkStatus =
+        "+OK [2 \"Dsp\" \"0.0.0.0\" [[\"control\" [\"00:90:5e:13:3b:27\" 4 2 \"192.0.2.10\" \"255.255.255.0\" " +
+        "\"\" \"\" \"192.0.2.1\"]]] [\"192.0.2.1\" \"\" \"\"] true false false 1 false true false 0 0]";
+
+    // A server with two network ports lists both, control first (made up).
+    private const string TwoPortNetworkStatus =
+        "+OK [2 \"Server\" \"0.0.0.0\" [[\"control\" [\"00:90:5e:00:00:01\" 4 2 \"192.0.2.10\" \"255.255.255.0\"]] " +
+        "[\"media\" [\"00:90:5e:00:00:02\" 4 2 \"198.51.100.10\" \"255.255.255.0\"]]] [\"192.0.2.1\" \"\" \"\"] true]";
+
+    private const string TwoPortVerboseNetworkStatus =
+        "+OK \"value\":{\"schemaVersion\":2 \"hostname\":\"Server\" \"networkInterfaceStatusWithName\":[" +
+        "{\"interfaceId\":\"control\" \"networkInterfaceStatus\":{\"macAddress\":\"00:90:5e:00:00:01\" \"ip\":\"192.0.2.10\"}} " +
+        "{\"interfaceId\":\"media\" \"networkInterfaceStatus\":{\"macAddress\":\"00:90:5e:00:00:02\" \"ip\":\"198.51.100.10\"}}]}";
+
+    [Fact]
+    public void Lists_the_one_interface_of_a_dsp_with_one_port()
+    {
+        foreach (var reply in new[] { DspNetworkStatus, NetworkStatus, VerboseNetworkStatus })
+        {
+            var status = TesiraDeviceInfoParser.NetworkStatus(reply)!;
+            status.MacAddress.Should().Be("00:90:5e:13:3b:27");
+            status.MacAddresses.Should().Equal("00:90:5e:13:3b:27");
+        }
+
+        TesiraDeviceInfoParser.NetworkStatus(DspNetworkStatus)!.IpAddress.Should().Be("192.0.2.10");
+        TesiraDeviceInfoParser.NetworkStatus(DspNetworkStatus)!.Hostname.Should().Be("Dsp");
+    }
+
+    [Theory]
+    [InlineData(TwoPortNetworkStatus)]
+    [InlineData(TwoPortVerboseNetworkStatus)]
+    public void Lists_every_interface_control_first(string reply)
+    {
+        var status = TesiraDeviceInfoParser.NetworkStatus(reply)!;
+        status.MacAddress.Should().Be("00:90:5e:00:00:01");
+        status.MacAddresses.Should().Equal("00:90:5e:00:00:01", "00:90:5e:00:00:02");
+        status.IpAddress.Should().Be("192.0.2.10");
+    }
+
+    [Fact]
+    public void The_mac_list_puts_the_interfaces_first_then_dante()
+    {
+        TesiraDeviceInfoParser.MacList(new[] { "78:45:01:00:00:01" }, "00:1d:c1:00:00:01", "")
+            .Should().Equal("78:45:01:00:00:01", "00:1d:c1:00:00:01");
+        TesiraDeviceInfoParser.MacList(new[] { "00:90:5e:00:00:01", "00:90:5e:00:00:02" }, "00:1d:c1:00:00:01", "00:1d:c1:00:00:02")
+            .Should().Equal("00:90:5e:00:00:01", "00:90:5e:00:00:02", "00:1d:c1:00:00:01", "00:1d:c1:00:00:02");
+    }
+
+    [Fact]
+    public void The_mac_list_leaves_out_blanks_repeats_and_non_macs()
+    {
+        TesiraDeviceInfoParser.MacList(new[] { "00:90:5e:00:00:01", " ", "00:90:5E:00:00:01" }, " 00:1d:c1:00:00:01 ", "unknown")
+            .Should().Equal("00:90:5e:00:00:01", "00:1d:c1:00:00:01");
+    }
+
+    [Fact]
+    public void One_mac_or_none_is_no_list()
+    {
+        // the single MAC already says it
+        TesiraDeviceInfoParser.MacList(new[] { "00:90:5e:00:00:01" }, null, "").Should().BeNull();
+        TesiraDeviceInfoParser.MacList(null, null, null).Should().BeNull();
+        TesiraDeviceInfoParser.MacList(new string[0], "00:1d:c1:00:00:01", null).Should().BeNull();
+    }
+
+    [Fact]
+    public void The_mac_list_stops_at_eight()
+    {
+        var many = Enumerable.Range(1, 12).Select(i => $"00:90:5e:00:00:{i:x2}");
+        TesiraDeviceInfoParser.MacList(many, null, null).Should().HaveCount(TesiraDeviceInfoParser.MaxMacAddresses);
+    }
+
     // deviceInfo returns deviceModel, deviceRevision, serialNumber, firmwareVersion and ipAddress,
     // in that order (Tesira Text Protocol DEVICE attribute table). No example reply is published, so
     // these are built from that order in both session styles.

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -126,7 +127,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                     return null;
                 }
 
-                return new TesiraNetworkStatus(Field(reply, "hostname"), mac, Field(reply, "ip"));
+                return new TesiraNetworkStatus(Field(reply, "hostname"), mac, Field(reply, "ip"), InterfaceMacs(reply));
             }
 
             // Non-verbose: hostname comes first, then the gateway, then for each interface its
@@ -162,10 +163,69 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                     hostname = null;
                 }
 
-                return new TesiraNetworkStatus(hostname, value, ip);
+                return new TesiraNetworkStatus(hostname, value, ip, InterfaceMacs(reply));
             }
 
             return null;
+        }
+
+        /// <summary>Most MACs a DSP reports in its list.</summary>
+        public const int MaxMacAddresses = 8;
+
+        /// <summary>
+        /// The DSP's MAC list: its network interfaces' MACs as networkStatus lists them (control
+        /// first), then the Dante interface's primary and secondary. Blanks, anything not shaped like
+        /// a MAC and repeats (any case) are left out, at most <see cref="MaxMacAddresses"/>. Null
+        /// when that leaves one MAC or none, which the single MAC already says.
+        /// </summary>
+        public static List<string> MacList(IEnumerable<string> interfaceMacs, string dantePrimary, string danteSecondary)
+        {
+            var macs = new List<string>();
+            var all = new List<string>();
+            if (interfaceMacs != null)
+            {
+                all.AddRange(interfaceMacs);
+            }
+
+            all.Add(dantePrimary);
+            all.Add(danteSecondary);
+
+            foreach (var raw in all)
+            {
+                var mac = raw == null ? null : raw.Trim();
+                if (string.IsNullOrEmpty(mac) || !MacShape.IsMatch(mac)
+                    || macs.Exists(m => string.Equals(m, mac, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                macs.Add(mac);
+                if (macs.Count == MaxMacAddresses)
+                {
+                    break;
+                }
+            }
+
+            return macs.Count > 1 ? macs : null;
+        }
+
+        /// <summary>
+        /// Every MAC in a networkStatus reply, in order: one per network interface, the control
+        /// interface first. The reply holds no other MAC-shaped value. Repeats left out.
+        /// </summary>
+        private static List<string> InterfaceMacs(string reply)
+        {
+            var macs = new List<string>();
+            foreach (Match s in QuotedString.Matches(reply))
+            {
+                var value = s.Groups[1].Value;
+                if (MacShape.IsMatch(value) && !macs.Exists(m => string.Equals(m, value, StringComparison.OrdinalIgnoreCase)))
+                {
+                    macs.Add(value);
+                }
+            }
+
+            return macs;
         }
 
         /// <summary>
@@ -374,14 +434,29 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     public sealed class TesiraNetworkStatus
     {
         public TesiraNetworkStatus(string hostname, string macAddress, string ipAddress)
+            : this(hostname, macAddress, ipAddress, null)
+        {
+        }
+
+        public TesiraNetworkStatus(string hostname, string macAddress, string ipAddress, List<string> macAddresses)
         {
             Hostname = hostname;
             MacAddress = macAddress;
             IpAddress = ipAddress;
+            MacAddresses = macAddresses ?? (macAddress == null ? new List<string>() : new List<string> { macAddress });
         }
 
         public string Hostname { get; private set; }
+
+        /// <summary>The control interface's MAC, the first one listed.</summary>
         public string MacAddress { get; private set; }
+
         public string IpAddress { get; private set; }
+
+        /// <summary>
+        /// Every interface's MAC in the order the DSP lists them, the control interface first. A
+        /// TesiraFORTÉ lists one; a TesiraSERVER lists one per network port.
+        /// </summary>
+        public List<string> MacAddresses { get; private set; }
     }
 }
