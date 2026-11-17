@@ -31,15 +31,16 @@ public class TesiraDanteParserTests
         "{\"name\":\"02\" \"number\":1 \"txrx\":RX \"faultOnInactive\":false \"flowCount\":0} " +
         "{\"name\":\"Spare In \" \"number\":2 \"txrx\":RX \"faultOnInactive\":true \"flowCount\":0}]}";
 
-    // The same reply with the names left out, records as lists, as a non-verbose session writes them.
+    // The same reply as a Tesira FORTE writes it in a non-verbose session: names left out, records as lists,
+    // and txrx as a number (1 is TX, 2 is RX).
     private const string DanteInfo =
         "+OK [[4 4 1 1 3 81 1 3 0 11] [\"Tesira-DAN\" [true \"192.0.2.26\" \"255.255.255.0\" \"192.0.2.1\" \"192.0.2.1\"] " +
         "[true \"192.0.2.26\" \"255.255.255.0\" \"192.0.2.1\" \"192.0.2.1\"]] " +
         "[[\"00:90:5e:07:df:7e\" 1000] [\"\" 0]] true false 1000 " +
-        "[[\"Program L\" 0 TX false 0] [\"\" 1 TX true 0] [\"Lectern Mic\" 0 RX true 1] [\"02\" 1 RX false 0] " +
-        "[\"Spare In \" 2 RX true 0]]]";
+        "[[\"Program L\" 0 1 false 0] [\"\" 1 1 true 0] [\"Lectern Mic\" 0 2 true 1] [\"02\" 1 2 false 0] " +
+        "[\"Spare In \" 2 2 true 0]]]";
 
-    // And with records in braces, as other non-verbose replies are written.
+    // And with records in braces and txrx as words, in case another firmware writes it so.
     private const string BracedDanteInfo =
         "+OK {{4 4 1 1 3 81 1 3 0 11} {\"Tesira-DAN\" {true \"192.0.2.26\" \"255.255.255.0\" \"192.0.2.1\" \"192.0.2.1\"} " +
         "{true \"192.0.2.26\" \"255.255.255.0\" \"192.0.2.1\" \"192.0.2.1\"}} " +
@@ -76,9 +77,16 @@ public class TesiraDanteParserTests
         info.Receive.Single().FlowCount.Should().BeNull();
     }
 
+    [Fact]
+    public void Refuses_a_channel_whose_direction_is_neither_way()
+    {
+        TesiraDanteParser.DanteInfo("+OK [[] [] [] false false 1000 [[\"Lectern Mic\" 0 3 true 1]]]").Should().BeNull();
+    }
+
     [Theory]
     [InlineData(NetworkStatus)]
     [InlineData(DanteFault)]
+    [InlineData("-ERR address not found: [0 0 0]")]
     [InlineData("+OK \"5.7.1.4\"")]
     [InlineData("+OK")]
     [InlineData("-ERR address not found: {\"deviceId\":0 \"classCode\":0 \"instanceNum\":0}")]
@@ -204,6 +212,7 @@ public class TesiraDanteParserTests
     [InlineData("+OK \"04000001\"")]
     [InlineData("+OK [[\"192.0.2.10\" \"TesiraForte\" false 1 11]]")]
     [InlineData("-ERR")]
+    [InlineData("-ERR address not found: [0 0 0]")]
     public void Refuses_a_reply_that_is_not_a_fault_list(string reply)
     {
         TesiraDanteParser.FaultList(reply).Should().BeNull();

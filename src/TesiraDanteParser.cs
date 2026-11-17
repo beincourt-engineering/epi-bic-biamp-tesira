@@ -267,7 +267,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// <summary>
         /// A <c>danteInfo</c> reply. The attribute holds, in order: revs, netCfg, allNetStatus,
         /// preferredDanteNetworkClockSource, networkClockSlaveOnly, networkLatencyInMicroseconds and chInfos,
-        /// each channel being name, number, txrx, faultOnInactive and flowCount. Null when the reply isn't one.
+        /// each channel being name, number, txrx (TX or RX, or 1 or 2 when non-verbose), faultOnInactive and
+        /// flowCount. Null when the reply isn't one.
         /// </summary>
         public static TesiraDanteInfo DanteInfo(string reply)
         {
@@ -292,8 +293,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 var txrx = ch.Get("txrx", 2)?.AsText();
                 var fault = ch.Get("faultOnInactive", 3)?.AsBool();
                 var flows = ch.Get("flowCount", 4)?.AsInt();
-                var receive = string.Equals(txrx, "RX", StringComparison.OrdinalIgnoreCase);
-                if (name == null || number == null || (!receive && !string.Equals(txrx, "TX", StringComparison.OrdinalIgnoreCase)))
+                // verbose gives the word, non-verbose the number: 1 is TX, 2 is RX
+                var receive = string.Equals(txrx, "RX", StringComparison.OrdinalIgnoreCase) || txrx == "2";
+                var transmit = string.Equals(txrx, "TX", StringComparison.OrdinalIgnoreCase) || txrx == "1";
+                if (name == null || number == null || (!receive && !transmit))
                     return null;
 
                 info.Channels.Add(new TesiraDanteChannel

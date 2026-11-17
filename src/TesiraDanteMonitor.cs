@@ -109,6 +109,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                     case "danteInfo":
                         if (TesiraDanteParser.IsError(message))
                         {
+                            // A DSP doesn't lose its Dante card at run time: once read, an error is a stray reply.
+                            if (dante.StartsWith("{\"present\":true", StringComparison.Ordinal))
+                            {
+                                this.LogDebug("Error reply to danteInfo after it was read, ignored: {message}", message);
+                                break;
+                            }
                             Set(ref dante, "{\"present\":false}", DanteFeedback);
                             break;
                         }
