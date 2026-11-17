@@ -64,6 +64,8 @@ public class TesiraDanteParserTests
         info!.PreferredLeader.Should().BeTrue();
         info.FollowerOnly.Should().BeFalse();
         info.LatencyMicroseconds.Should().Be(1000);
+        info.PrimaryMac.Should().Be("00:90:5e:07:df:7e");
+        info.SecondaryMac.Should().BeNull();
         info.Transmit.Select(c => c.Name).Should().Equal("Program L", "");
         info.Receive.Select(c => (c.Number, c.Name, c.FaultOnInactive, c.FlowCount))
             .Should().Equal((0, "Lectern Mic", true, 1), (1, "02", false, 0), (2, "Spare In ", true, 0));

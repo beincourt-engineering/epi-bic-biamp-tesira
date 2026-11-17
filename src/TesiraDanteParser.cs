@@ -217,6 +217,13 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         public bool? PreferredLeader { get; set; }
         public bool? FollowerOnly { get; set; }
         public int? LatencyMicroseconds { get; set; }
+
+        /// <summary>The Dante card's primary port MAC, or null when not reported.</summary>
+        public string PrimaryMac { get; set; }
+
+        /// <summary>The Dante card's secondary port MAC, or null when not reported or not connected.</summary>
+        public string SecondaryMac { get; set; }
+
         public List<TesiraDanteChannel> Channels { get; } = new List<TesiraDanteChannel>();
 
         public IEnumerable<TesiraDanteChannel> Receive
@@ -285,6 +292,14 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 LatencyMicroseconds = root.Get("networkLatencyInMicroseconds", 5)?.AsInt(),
             };
 
+            // allNetStatus: primaryStatus then secondaryStatus, each a MAC and a link speed; "" when not connected
+            var net = root.Get("allNetStatus", 2);
+            if (net != null && net.IsContainer)
+            {
+                info.PrimaryMac = MacOf(net.Get("primaryStatus", 0));
+                info.SecondaryMac = MacOf(net.Get("secondaryStatus", 1));
+            }
+
             foreach (var ch in channels.Items)
             {
                 if (!ch.IsContainer) return null;
@@ -306,6 +321,13 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             }
 
             return info;
+        }
+
+        private static string MacOf(TtpNode status)
+        {
+            if (status == null || !status.IsContainer) return null;
+            var mac = status.Get("macAddress", 0)?.AsText();
+            return string.IsNullOrWhiteSpace(mac) ? null : mac.Trim();
         }
 
         /// <summary>True for an error reply, as a DSP without a Dante interface answers <c>danteInfo</c>.</summary>
