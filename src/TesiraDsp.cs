@@ -96,7 +96,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         public bool OkayToSend = false;
         public bool ControlsAdded = false;
 
-        private TesiraDspDeviceInfo DevInfo { get; set; }
+        /// <summary>The device info component; other components add what they read (the Dante MACs).</summary>
+        internal TesiraDspDeviceInfo DevInfo { get; private set; }
 
         /// <summary>
         /// Hostname/IP from the configured comm object, captured in the constructor and

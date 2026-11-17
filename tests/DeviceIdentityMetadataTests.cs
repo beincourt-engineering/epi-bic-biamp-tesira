@@ -47,6 +47,10 @@ public class DeviceIdentityMetadataTests
         source.Should().Contain("TesiraDeviceInfoParser.MacList(interfaceMacs, dantePrimaryMac, danteSecondaryMac)");
         source.Should().Contain("identity.MacAddresses = list;");
         source.Should().Contain("public void SetDanteMacAddresses(string primary, string secondary)");
+
+        // the Dante monitor hands over the MACs each danteInfo reply carries
+        var monitor = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraDanteMonitor.cs"));
+        monitor.Should().Contain("devInfo.SetDanteMacAddresses(info.PrimaryMac, info.SecondaryMac);");
     }
 
     [Fact]
