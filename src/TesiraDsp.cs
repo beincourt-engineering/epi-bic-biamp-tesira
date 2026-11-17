@@ -124,6 +124,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
         private TesiraDanteMonitor DanteMonitor { get; set; }
 
+        private List<TesiraVoipMonitor> VoipMonitors { get; set; } = new List<TesiraVoipMonitor>();
+
         private bool initalSubscription = true;
 
         private readonly object watchdogLock = new object();
@@ -389,6 +391,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
             CreateDanteMonitor();
 
+            CreateVoipMonitors(props);
+
             //Keep me at the end of this method!
             CreateExpanderTracker(props);
 
@@ -419,6 +423,30 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             Feedbacks.Add(DevInfo.HostnameFeedback);
             Feedbacks.Add(DevInfo.IpAddressFeedback);
             Feedbacks.Add(DevInfo.MacAddressFeedback);
+            Feedbacks.Add(DevInfo.NetworkFeedback);
+        }
+
+        /// <summary>
+        /// One VoIP network monitor per VoIP control/status block among the enabled VoIP dialers (two dialers on
+        /// one card share a block), so each card's own network interface is read for monitoring.
+        /// </summary>
+        private void CreateVoipMonitors(TesiraDspPropertiesConfig props)
+        {
+            VoipMonitors = new List<TesiraVoipMonitor>();
+            if (props.DialerControlBlocks == null) return;
+
+            var tags = props.DialerControlBlocks.Values
+                .Where(b => b != null && b.Enabled && b.IsVoip && !string.IsNullOrEmpty(b.ControlStatusInstanceTag))
+                .Select(b => b.ControlStatusInstanceTag)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            foreach (var tag in tags)
+            {
+                var monitor = new TesiraVoipMonitor(this, tag, tags.Count == 1 ? "voip" : "voip " + tag);
+                VoipMonitors.Add(monitor);
+                DeviceManager.AddDevice(monitor);
+            }
         }
 
         /// <summary>
@@ -1296,6 +1324,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
             // The Dante interface and the fault list, at the lowest priority
             DanteMonitor?.AskAll();
+
+            // Each VoIP card's own network interface, at the lowest priority
+            foreach (var voip in VoipMonitors)
+            {
+                voip.AskNetwork();
+            }
 
             // Queue all min level requests
             var volumeComponents = ControlPointList.OfType<IVolumeComponent>().ToList();

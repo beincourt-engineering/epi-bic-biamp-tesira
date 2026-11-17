@@ -44,13 +44,26 @@ public class DeviceIdentityMetadataTests
         var source = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraDspDeviceInfo.cs"));
 
         source.Should().Contain("interfaceMacs = status.MacAddresses;");
-        source.Should().Contain("TesiraDeviceInfoParser.MacList(interfaceMacs, dantePrimaryMac, danteSecondaryMac)");
+        source.Should().Contain("TesiraDeviceInfoParser.MacList(interfaceMacs, dantePrimaryMac, danteSecondaryMac,");
+        source.Should().Contain("voipNics.Select(p => p.Value.Mac)");
+        source.Should().Contain("controlNics = TesiraNicParser.ControlNics(message);");
+        source.Should().Contain("NetworkFeedback = new StringFeedback(\"network\", () => network);");
         source.Should().Contain("identity.MacAddresses = list;");
         source.Should().Contain("public void SetDanteMacAddresses(string primary, string secondary)");
 
         // the Dante monitor hands over the MACs each danteInfo reply carries
         var monitor = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraDanteMonitor.cs"));
         monitor.Should().Contain("devInfo.SetDanteMacAddresses(info.PrimaryMac, info.SecondaryMac);");
+        monitor.Should().Contain("devInfo.SetDanteNetwork(TesiraNicParser.DanteNics(message));");
+
+        // each VoIP card's network is asked of its control/status block and handed over
+        var voip = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraVoipMonitor.cs"));
+        voip.Should().Contain("string.Format(\"{0} get network\", tag)");
+        voip.Should().Contain("devInfo.SetVoipNic(tag, nic);");
+        var dsp = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraDsp.cs"));
+        dsp.Should().Contain("b.Enabled && b.IsVoip");
+        dsp.Should().Contain("voip.AskNetwork();");
+        dsp.Should().Contain("Feedbacks.Add(DevInfo.NetworkFeedback);");
     }
 
     [Fact]

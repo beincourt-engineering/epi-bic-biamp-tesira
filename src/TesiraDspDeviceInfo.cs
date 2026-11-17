@@ -127,6 +127,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             MacAddressFeedback = new StringFeedback("macAddress", () => MacAddress);
             MakeFeedback = new StringFeedback("make", () => Make);
             ModelFeedback = new StringFeedback("model", () => Model);
+            NetworkFeedback = new StringFeedback("network", () => network);
 
             // The parent's CommandPassthruFeedback is not listed: it changes on every line the DSP
             // sends. LinkToApi links it to the bridge directly.
@@ -137,6 +138,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             Feedbacks.Add(SerialNumberFeedback);
             Feedbacks.Add(FirmwareFeedback);
             Feedbacks.Add(MacAddressFeedback);
+            Feedbacks.Add(NetworkFeedback);
         }
 
         /// <summary>
@@ -185,13 +187,71 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             }
         }
 
+        private List<TesiraNic> controlNics = new List<TesiraNic>();
+        private List<TesiraNic> danteNics = new List<TesiraNic>();
+        private readonly List<KeyValuePair<string, TesiraNic>> voipNics = new List<KeyValuePair<string, TesiraNic>>();
+        private string network = "";
+
+        /// <summary>
+        /// <c>network</c>: JSON of the DSP's host name and every network interface it reports (the control
+        /// port, the Dante primary and secondary, each VoIP card), each with its MAC, link, addressing,
+        /// address, mask, gateway and DNS. Empty until the DSP has answered.
+        /// </summary>
+        public StringFeedback NetworkFeedback { get; private set; }
+
+        /// <summary>The Dante ports from <c>DEVICE get danteInfo</c>, primary then secondary.</summary>
+        public void SetDanteNetwork(List<TesiraNic> nics)
+        {
+            lock (macLock)
+            {
+                danteNics = nics ?? new List<TesiraNic>();
+            }
+
+            ApplyNetwork();
+        }
+
+        /// <summary>A VoIP card's interface, from its control/status block <paramref name="tag"/>.</summary>
+        public void SetVoipNic(string tag, TesiraNic nic)
+        {
+            if (nic == null) return;
+            lock (macLock)
+            {
+                var at = voipNics.FindIndex(p => p.Key == tag);
+                if (at >= 0) voipNics[at] = new KeyValuePair<string, TesiraNic>(tag, nic);
+                else voipNics.Add(new KeyValuePair<string, TesiraNic>(tag, nic));
+            }
+
+            var macsChanged = ApplyMacList();
+            ApplyNetwork();
+            if (macsChanged) OnDeviceInfoChanged();
+        }
+
+        /// <summary>Rebuilds the network feedback from every interface read so far.</summary>
+        private void ApplyNetwork()
+        {
+            string json;
+            lock (macLock)
+            {
+                var all = new List<TesiraNic>();
+                all.AddRange(controlNics);
+                all.AddRange(danteNics);
+                all.AddRange(voipNics.Select(p => p.Value));
+                json = all.Count == 0 ? "" : TesiraNicParser.NetworkJson(Hostname, all);
+            }
+
+            if (json == network) return;
+            network = json;
+            NetworkFeedback.FireUpdate();
+        }
+
         /// <summary>Rebuilds the identity's MAC list; true when it changed.</summary>
         private bool ApplyMacList()
         {
             List<string> list;
             lock (macLock)
             {
-                list = TesiraDeviceInfoParser.MacList(interfaceMacs, dantePrimaryMac, danteSecondaryMac);
+                list = TesiraDeviceInfoParser.MacList(interfaceMacs, dantePrimaryMac, danteSecondaryMac,
+                    voipNics.Select(p => p.Value.Mac));
             }
 
             var old = identity.MacAddresses;
@@ -337,9 +397,11 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                             lock (macLock)
                             {
                                 interfaceMacs = status.MacAddresses;
+                                controlNics = TesiraNicParser.ControlNics(message);
                             }
 
                             ApplyMacList();
+                            ApplyNetwork();
                             OnDeviceInfoChanged();
                             break;
                         }

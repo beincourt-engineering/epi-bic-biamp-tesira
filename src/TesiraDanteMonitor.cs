@@ -127,7 +127,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                         Set(ref dante, TesiraDanteValues.DanteJson(info), DanteFeedback);
                         // The Dante interface's MACs join the DSP's MAC list after its network interfaces'.
                         var devInfo = Parent.DevInfo;
-                        if (devInfo != null) devInfo.SetDanteMacAddresses(info.PrimaryMac, info.SecondaryMac);
+                        if (devInfo != null)
+                        {
+                            devInfo.SetDanteMacAddresses(info.PrimaryMac, info.SecondaryMac);
+                            // and each Dante port's link and addressing, listed with the DSP's other interfaces
+                            devInfo.SetDanteNetwork(TesiraNicParser.DanteNics(message));
+                        }
                         break;
 
                     case "activeFaultList":

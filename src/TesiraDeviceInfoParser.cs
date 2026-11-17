@@ -180,6 +180,14 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// </summary>
         public static List<string> MacList(IEnumerable<string> interfaceMacs, string dantePrimary, string danteSecondary)
         {
+            return MacList(interfaceMacs, dantePrimary, danteSecondary, null);
+        }
+
+        /// <summary>
+        /// The same, with the VoIP cards' MACs (<paramref name="voipMacs"/>) listed after the Dante interface's.
+        /// </summary>
+        public static List<string> MacList(IEnumerable<string> interfaceMacs, string dantePrimary, string danteSecondary, IEnumerable<string> voipMacs)
+        {
             var macs = new List<string>();
             var all = new List<string>();
             if (interfaceMacs != null)
@@ -189,6 +197,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
             all.Add(dantePrimary);
             all.Add(danteSecondary);
+            if (voipMacs != null)
+            {
+                all.AddRange(voipMacs);
+            }
 
             foreach (var raw in all)
             {
