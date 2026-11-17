@@ -144,6 +144,57 @@ public class TesiraDeviceInfoParserTests
         TesiraDeviceInfoParser.Model(reply, "04223456").Should().Be("TESIRAFORTE_X_1600");
     }
 
+    // What a TesiraFORTÉ on firmware 5.7 sends (shapes from a unit; serial and address made up):
+    // verbose, the fields sit under "info", not "value"; non-verbose, they come as a list.
+    private const string DspVerboseDeviceInfo =
+        "+OK \"info\":{\"deviceModel\":\"TesiraFORTÉ DAN VT\" \"deviceRevision\":\"Rev. A\" " +
+        "\"serialNumber\":\"04223456\" \"firmwareVersion\":\"5.7.0.12\" \"ipAddress\":\"192.0.2.10\"}";
+
+    private const string DspDeviceInfo =
+        "+OK [\"TesiraFORTÉ DAN VT\" \"Rev. A\" \"04223456\" \"5.7.0.12\" \"192.0.2.10\"]";
+
+    [Theory]
+    [InlineData(DspVerboseDeviceInfo)]
+    [InlineData(DspDeviceInfo)]
+    [InlineData(DspDeviceInfo + "\r")]
+    public void Reads_the_model_as_a_dsp_sends_it(string reply)
+    {
+        TesiraDeviceInfoParser.Model(reply, null).Should().Be("TesiraFORTÉ DAN VT");
+        TesiraDeviceInfoParser.Model(reply, "04223456").Should().Be("TesiraFORTÉ DAN VT");
+        TesiraDeviceInfoParser.Model(reply, "09999999").Should().BeNull("a reply without the known serial is another DSP's or a misread");
+    }
+
+    [Fact]
+    public void Puts_back_an_accent_that_arrived_one_byte_per_character()
+    {
+        // É is C3 89 in UTF-8; a session that reads one byte per character sees "Ã" and U+0089.
+        var garbled = DspDeviceInfo.Replace("É", "Ã\u0089");
+        TesiraDeviceInfoParser.Model(garbled, "04223456").Should().Be("TesiraFORTÉ DAN VT");
+    }
+
+    [Theory]
+    [InlineData("TesiraFORTÉ DAN VT", "TesiraFORTÉ DAN VT")]
+    [InlineData("TesiraFORTÃ\u0089 DAN VT", "TesiraFORTÉ DAN VT")]
+    [InlineData("TesiraFORTE X 1600", "TesiraFORTE X 1600")]
+    [InlineData("Café", "Café")] // Latin-1 that isn't UTF-8 read as bytes stays
+    [InlineData("", "")]
+    public void RepairUtf8_only_changes_utf8_read_as_bytes(string text, string expected)
+    {
+        TesiraDeviceInfoParser.RepairUtf8(text).Should().Be(expected);
+    }
+
+    [Theory]
+    // danteInfo, verbose: an object under another key is not a device info reply
+    [InlineData("+OK \"danteInfo\":{\"revs\":{\"danteAPIVersion_major\":4} \"netCfg\":{\"hostname\":\"Dsp-DAN\"}}")]
+    // danteInfo, non-verbose: a list of lists
+    [InlineData("+OK [[4 4 1 1 3 81 1 3 0 11] [\"Dsp-DAN\" [true \"192.0.2.11\"]]]")]
+    // networkStatus, non-verbose, as a DSP sends it
+    [InlineData("+OK [2 \"Dsp\" \"0.0.0.0\" [[\"control\" [\"00:90:5e:13:3b:27\" 4 2 \"192.0.2.10\"]]] true]")]
+    public void A_dsp_s_other_replies_are_not_a_model(string reply)
+    {
+        TesiraDeviceInfoParser.Model(reply, null).Should().BeNull();
+    }
+
     [Fact]
     public void A_reply_without_the_known_serial_is_not_this_dsp_s_model()
     {

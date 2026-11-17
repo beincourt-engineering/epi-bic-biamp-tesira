@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using System.Text.RegularExpressions;
 
 // The plugin builds without nullable annotations; the test project links this file and has them on.
@@ -32,6 +33,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         private static readonly Regex Ipv4Shape = new Regex("^\\d{1,3}(\\.\\d{1,3}){3}$");
         private static readonly Regex VersionShape = new Regex("^\\d+(\\.\\d+){2,3}$");
         private static readonly Regex SerialShape = new Regex("^[A-Za-z0-9]{4,32}$");
+        private static readonly Regex KeyedObject = new Regex("^\"([A-Za-z]+)\"\\s*:\\s*\\{");
 
         /// <summary>
         /// The value of a reply, verbose or not, without its quotes. Null when the reply carries no
@@ -172,8 +174,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// </summary>
         /// <remarks>
         /// The attribute returns deviceModel, deviceRevision, serialNumber, firmwareVersion and
-        /// ipAddress, in that order. Verbose, the model is the <c>deviceModel</c> field. Non-verbose,
-        /// it is the first value of the reply's object, quoted or not.
+        /// ipAddress, in that order. A DSP on firmware 5.7 answers verbose with
+        /// <c>+OK "info":{"deviceModel":"TesiraFORTÉ DAN VT" "deviceRevision":"Rev. A" ...}</c> and
+        /// non-verbose with a list, <c>+OK ["TesiraFORTÉ DAN VT" "Rev. A" "&lt;serial&gt;" ...]</c>.
+        /// Verbose, the model is the <c>deviceModel</c> field (under <c>info</c> or <c>value</c>).
+        /// Non-verbose, it is the first value of the list (or of an object body), quoted or not.
+        /// The model name can carry an accent (FORTÉ), sent as UTF-8; see <see cref="RepairUtf8"/>.
         ///
         /// Refused: anything not an object, an object holding a MAC address (a networkStatus
         /// reply), and a model that looks like an address or a version. When the serial number is
@@ -210,19 +216,28 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             }
 
             string model;
-            if (reply.IndexOf(ValueKey, StringComparison.Ordinal) >= 0)
+            var body = reply.Substring(Ok.Length).Trim();
+            var keyed = KeyedObject.Match(body);
+            if (keyed.Success)
             {
-                model = Field(reply, "deviceModel") ?? BareField(reply, "deviceModel");
-            }
-            else
-            {
-                var open = reply.IndexOf('{');
-                if (open < 0 || reply.Substring(Ok.Length, open - Ok.Length).Trim().Length > 0)
+                // Verbose: "info":{"deviceModel":...} as a DSP sends it, or "value":{...}. Only the
+                // named field counts, so another attribute's object is never read as a model.
+                if (keyed.Groups[1].Value != "info" && keyed.Groups[1].Value != "value")
                 {
                     return null;
                 }
 
-                model = FirstValue(reply.Substring(open + 1));
+                model = Field(body, "deviceModel") ?? BareField(body, "deviceModel");
+            }
+            else if (body.StartsWith("[", StringComparison.Ordinal) || body.StartsWith("{", StringComparison.Ordinal))
+            {
+                // Non-verbose: the values in order, as a list ["model" "rev" "serial" ...] as a DSP
+                // sends it, or an object body. The model is the first.
+                model = FirstValue(body.Substring(1));
+            }
+            else
+            {
+                return null;
             }
 
             if (model == null)
@@ -230,7 +245,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 return null;
             }
 
-            model = model.Trim();
+            model = RepairUtf8(model).Trim();
             if (model.Length == 0 || model.Length > 64 || Ipv4Shape.IsMatch(model) || VersionShape.IsMatch(model))
             {
                 return null;
@@ -245,6 +260,49 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Text the DSP sent as UTF-8 but that arrived read one byte per character (a telnet
+        /// session decodes Latin-1), put back: <c>FORTÃ‰</c> becomes <c>FORTÉ</c>. Anything that
+        /// isn't such text comes back as it was.
+        /// </summary>
+        public static string RepairUtf8(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+
+            var high = false;
+            foreach (var c in text)
+            {
+                if (c > 'ÿ')
+                {
+                    return text;
+                }
+
+                if (c >= '\u0080')
+                {
+                    high = true;
+                }
+            }
+
+            if (!high)
+            {
+                return text;
+            }
+
+            try
+            {
+                var bytes = Encoding.GetEncoding(28591).GetBytes(text);
+                return new UTF8Encoding(false, true).GetString(bytes, 0, bytes.Length);
+            }
+            catch (ArgumentException)
+            {
+                // Not UTF-8 once read as bytes, so it was Latin-1 all along.
+                return text;
+            }
         }
 
         /// <summary>The first value in an object's body: a quoted string, or a bare word.</summary>
