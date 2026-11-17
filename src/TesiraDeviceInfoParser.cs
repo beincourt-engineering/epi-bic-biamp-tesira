@@ -174,8 +174,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
         /// <summary>
         /// The DSP's MAC list: its network interfaces' MACs as networkStatus lists them (control
-        /// first), then the Dante interface's primary and secondary. Blanks, anything not shaped like
-        /// a MAC and repeats (any case) are left out, at most <see cref="MaxMacAddresses"/>. Null
+        /// first), then the Dante interface's primary and secondary, each in lowercase. Blanks, anything not
+        /// shaped like a MAC and repeats (any case) are left out, at most <see cref="MaxMacAddresses"/>. Null
         /// when that leaves one MAC or none, which the single MAC already says.
         /// </summary>
         public static List<string> MacList(IEnumerable<string> interfaceMacs, string dantePrimary, string danteSecondary)
@@ -211,7 +211,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                     continue;
                 }
 
-                macs.Add(mac);
+                // lowercase, as networkStatus and danteInfo send them: a VoIP card sends its MAC in capitals
+                macs.Add(mac.ToLowerInvariant());
                 if (macs.Count == MaxMacAddresses)
                 {
                     break;

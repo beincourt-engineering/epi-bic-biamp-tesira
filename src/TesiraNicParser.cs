@@ -91,7 +91,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 nics.Add(new TesiraNic
                 {
                     Name = entry.Get("interfaceId", 0)?.AsText() ?? "control",
-                    Mac = Blank(status.Get("macAddress", 0)?.AsText()),
+                    Mac = MacText(status.Get("macAddress", 0)?.AsText()),
                     Link = LinkText(linkWord),
                     LinkMbps = LinkMbps(linkWord),
                     LinkUp = LinkUp(linkWord),
@@ -143,7 +143,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 {
                     Name = ports[i][2],
                     Hostname = hostname,
-                    Mac = status != null && status.IsContainer ? Blank(status.Get("macAddress", 0)?.AsText()) : null,
+                    Mac = status != null && status.IsContainer ? MacText(status.Get("macAddress", 0)?.AsText()) : null,
                     LinkMbps = speed > 0 ? speed : null,
                     LinkUp = speed == null ? (bool?)null : speed > 0,
                     Link = speed == null ? null : speed > 0 ? speed.Value.ToString(CultureInfo.InvariantCulture) + " Mb/s" : "down",
@@ -170,7 +170,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             var general = root.Get("general", 0);
             if (general == null || !general.IsContainer) return null;
 
-            var mac = Blank(general.Get("mac", 0)?.AsText());
+            var mac = MacText(general.Get("mac", 0)?.AsText());
             if (mac == null || !MacShape.IsMatch(mac)) return null;
 
             var vlan = root.Get("vlan", 1);
@@ -247,6 +247,13 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         private static string Blank(string text)
         {
             return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        }
+
+        /// <summary>A MAC in lowercase, as networkStatus and danteInfo send them; a VoIP card sends its MAC in capitals.</summary>
+        private static string MacText(string text)
+        {
+            var mac = Blank(text);
+            return mac == null ? null : mac.ToLowerInvariant();
         }
 
         /// <summary>An enum's word: as sent when verbose, from the known numbers when not, else "code N".</summary>

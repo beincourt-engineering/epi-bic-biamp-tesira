@@ -190,6 +190,22 @@ public class TesiraNicParserTests
     }
 
     [Fact]
+    public void A_voip_card_s_capital_mac_is_read_in_lowercase()
+    {
+        // a VoIP card sends its MAC in capitals; networkStatus and danteInfo send theirs in lowercase
+        var reply = VoipNetwork.Replace("\"78:45:01:00:00:02\"", "\"78:45:01:0A:0B:CD\"");
+
+        TesiraNicParser.VoipNic(reply, "voip")!.Mac.Should().Be("78:45:01:0a:0b:cd");
+    }
+
+    [Fact]
+    public void The_mac_list_is_lowercase_and_drops_a_repeat_in_other_case()
+    {
+        TesiraDeviceInfoParser.MacList(new[] { "00:90:5E:00:00:01" }, "00:1d:c1:00:00:01", "00:90:5e:00:00:01", new[] { "78:45:01:0A:0B:CD" })
+            .Should().Equal("00:90:5e:00:00:01", "00:1d:c1:00:00:01", "78:45:01:0a:0b:cd");
+    }
+
+    [Fact]
     public void The_mac_list_takes_the_voip_card_after_dante()
     {
         TesiraDeviceInfoParser.MacList(new[] { "00:90:5e:00:00:01" }, "00:1d:c1:00:00:01", "", new[] { "78:45:01:00:00:02" })
