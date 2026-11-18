@@ -107,32 +107,68 @@ public class TesiraDanteParserTests
     }
 
     [Fact]
-    public void The_dante_value_lists_the_channels_that_must_carry_audio_with_their_flows()
+    public void The_dante_value_marks_each_channel_expected_or_not_in_use_from_the_config()
     {
-        var json = JObject.Parse(TesiraDanteValues.DanteJson(TesiraDanteParser.DanteInfo(DanteInfo)!));
+        var expected = new[] { "Lectern Mic", "tx:Program L", "Podium Mic" };
+
+        var json = JObject.Parse(TesiraDanteValues.DanteJson(TesiraDanteParser.DanteInfo(DanteInfo)!, expected));
 
         json["present"]!.Value<bool>().Should().BeTrue();
         json["rx"]!.Value<int>().Should().Be(3);
         json["tx"]!.Value<int>().Should().Be(2);
         json["preferredLeader"]!.Value<bool>().Should().BeTrue();
         json["latencyUs"]!.Value<int>().Should().Be(1000);
-        // receive channels first, names trimmed, then transmit
-        json["watched"]!.ToString(Newtonsoft.Json.Formatting.None)
-            .Should().Be("[[0,\"Lectern Mic\",\"rx\",1],[2,\"Spare In\",\"rx\",0],[1,\"\",\"tx\",0]]");
+        json["configured"]!.Value<bool>().Should().BeTrue();
+        // expected first (receive, then transmit), then the rest; names trimmed. "Spare In" is set to fault
+        // when inactive on the DSP, but the config doesn't use it, so it is not in use.
+        json["ch"]!.ToString(Newtonsoft.Json.Formatting.None).Should().Be(
+            "[[0,\"Lectern Mic\",\"rx\",1,\"e\"],[0,\"Program L\",\"tx\",0,\"e\"]," +
+            "[1,\"02\",\"rx\",0,\"u\"],[2,\"Spare In\",\"rx\",0,\"u\"],[1,\"\",\"tx\",0,\"u\"]]");
+        // an expected name the DSP doesn't have
+        json["missing"]!.ToString(Newtonsoft.Json.Formatting.None).Should().Be("[\"Podium Mic\"]");
+        json["watched"].Should().BeNull();
     }
 
     [Fact]
-    public void The_dante_value_stays_whole_json_under_the_limit()
+    public void Without_an_expected_list_every_channel_is_listed_and_none_is_expected()
     {
-        var channels = string.Join(" ", Enumerable.Range(0, 64).Select(i => $"[\"Receive channel long name {i:00}\" {i} RX true 1]"));
-        var reply = "+OK [[] [] [] false false 1000 [" + channels + "]]";
+        var json = JObject.Parse(TesiraDanteValues.DanteJson(TesiraDanteParser.DanteInfo(DanteInfo)!));
 
-        var text = TesiraDanteValues.DanteJson(TesiraDanteParser.DanteInfo(reply)!);
+        json["configured"]!.Value<bool>().Should().BeFalse();
+        json["ch"]!.Count().Should().Be(5);
+        json["ch"]!.Select(c => c[4]!.Value<string>()).Should().OnlyContain(m => m == "u");
+        json["missing"]!.Count().Should().Be(0);
+    }
+
+    [Fact]
+    public void Expected_names_match_trimmed_and_ignoring_case_and_rx_and_tx_stay_apart()
+    {
+        // "program l" without tx: names a receive channel, and the DSP has no receive channel of that name.
+        var expected = new[] { "  lectern MIC ", "rx:spare in", "program l" };
+
+        var json = JObject.Parse(TesiraDanteValues.DanteJson(TesiraDanteParser.DanteInfo(DanteInfo)!, expected));
+
+        json["ch"]!.Where(c => c[4]!.Value<string>() == "e").Select(c => c[1]!.Value<string>())
+            .Should().Equal("Lectern Mic", "Spare In");
+        json["missing"]!.Select(m => m.Value<string>()).Should().Equal("program l");
+    }
+
+    [Fact]
+    public void The_dante_value_stays_whole_json_under_the_limit_and_keeps_expected_channels()
+    {
+        var channels = string.Join(" ", Enumerable.Range(0, 64).Select(i => $"[\"Receive channel long name {i:00}\" {i} RX false 1]"));
+        var reply = "+OK [[] [] [] false false 1000 [" + channels + "]]";
+        var expected = new[] { "Receive channel long name 63", "Receive channel long name 40" };
+
+        var text = TesiraDanteValues.DanteJson(TesiraDanteParser.DanteInfo(reply)!, expected);
 
         text.Length.Should().BeLessOrEqualTo(TesiraDanteValues.MaxValueChars);
         var json = JObject.Parse(text);
         json["rx"]!.Value<int>().Should().Be(64);
-        (json["watched"]!.Count() + json["more"]!.Value<int>()).Should().Be(64);
+        (json["ch"]!.Count() + json["more"]!.Value<int>()).Should().Be(64);
+        // not-in-use channels are left out first
+        json["ch"]!.Take(2).Select(c => c[1]!.Value<string>())
+            .Should().Equal("Receive channel long name 40", "Receive channel long name 63");
     }
 
     // activeFaultList: a list of indicator entries (in the device, in the system), each an id, its name, the

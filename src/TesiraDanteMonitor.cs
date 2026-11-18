@@ -17,8 +17,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     /// Feedbacks, all on the DSP's own list:
     /// <list type="bullet">
     /// <item><c>dante</c>: JSON. <c>{"present":false}</c> on a DSP without Dante, else the receive and
-    /// transmit channel counts, the clock settings and the channels set to fault when inactive, which are
-    /// the ones that should always carry audio, each with how many flows it is in. It is asked again
+    /// transmit channel counts, the clock settings and every channel with how many flows it is in, each
+    /// marked expected or not in use from the config's <c>dante.expected</c> list. It is asked again
     /// whenever the fault list changes.</item>
     /// <item><c>activeFaults</c>: JSON list of the DSP's active faults, each its id, name and instance.</item>
     /// <item><c>HealthLevel</c> / <c>HealthIssues</c>: ok, warning or fault from the fault list, and the
@@ -46,9 +46,14 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         private System.Timers.Timer faultTimer;
         private System.Timers.Timer danteTimer;
 
-        public TesiraDanteMonitor(TesiraDsp parent)
+        private readonly System.Collections.Generic.List<string> expected;
+
+        /// <param name="parent">The DSP.</param>
+        /// <param name="expected">The config's <c>dante.expected</c> channel names, or null when not set.</param>
+        public TesiraDanteMonitor(TesiraDsp parent, System.Collections.Generic.IEnumerable<string> expected = null)
             : base("DEVICE", "DEVICE", 0, 0, parent, string.Format(keyFormatter, parent.Key, "Dante"), "Dante", 0)
         {
+            this.expected = expected == null ? null : new System.Collections.Generic.List<string>(expected);
             DanteFeedback = new StringFeedback("dante", () => dante);
             ActiveFaultsFeedback = new StringFeedback("activeFaults", () => activeFaults);
             HealthLevelFeedback = new StringFeedback("HealthLevel", () => healthLevel);
@@ -124,7 +129,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                             this.LogDebug("Not a danteInfo reply, ignored: {message}", message);
                             break;
                         }
-                        Set(ref dante, TesiraDanteValues.DanteJson(info), DanteFeedback);
+                        Set(ref dante, TesiraDanteValues.DanteJson(info, expected), DanteFeedback);
                         // The Dante interface's MACs join the DSP's MAC list after its network interfaces'.
                         var devInfo = Parent.DevInfo;
                         if (devInfo != null)

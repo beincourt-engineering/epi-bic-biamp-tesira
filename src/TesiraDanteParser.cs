@@ -434,18 +434,49 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         public const int MaxValueChars = 2000;
 
         /// <summary>
-        /// The Dante interface as the <c>dante</c> feedback carries it. <c>watched</c> lists each channel set
-        /// to fault when inactive as <c>[number, name, "rx" or "tx", flowCount]</c>, receive channels first;
-        /// a flowCount of 0 means nothing is subscribed to it, and that alone raises the DSP's Dante fault.
+        /// The Dante interface as the <c>dante</c> feedback carries it. <c>ch</c> lists every channel as
+        /// <c>[number, name, "rx" or "tx", flowCount, "e" or "u"]</c>: "e" when the system's config expects it to
+        /// carry audio, "u" when nothing in the config uses it. Expected channels come first (receive, then
+        /// transmit), then the rest. <c>missing</c> lists expected names the DSP doesn't have, and
+        /// <c>configured</c> says whether the config gave an expected list at all. A flowCount of 0 means
+        /// nothing is subscribed to the channel. The DSP's own fault-when-inactive setting isn't used.
         /// </summary>
-        public static string DanteJson(TesiraDanteInfo info)
+        /// <param name="info">The parsed <c>danteInfo</c> reply.</param>
+        /// <param name="expected">
+        /// The channel names from the config's <c>dante.expected</c>. A name is a receive channel's unless it
+        /// starts with <c>tx:</c>. Names match trimmed and ignoring case. Null or empty when not configured.
+        /// </param>
+        public static string DanteJson(TesiraDanteInfo info, IEnumerable<string> expected = null)
         {
-            var watched = info.Channels
-                .Where(c => c.FaultOnInactive)
-                .OrderBy(c => c.Receive ? 0 : 1)
-                .ThenBy(c => c.Number)
-                .Select(c => new object[] { c.Number, (c.Name ?? "").Trim(), c.Receive ? "rx" : "tx", c.FlowCount })
+            var wanted = ExpectedNames(expected);
+            var found = new HashSet<string>(StringComparer.Ordinal);
+
+            var rows = info.Channels
+                .Select(c =>
+                {
+                    var name = (c.Name ?? "").Trim();
+                    var key = Key(c.Receive, name);
+                    var isExpected = name.Length > 0 && wanted.Contains(key);
+                    if (isExpected) found.Add(key);
+                    return new { Channel = c, Name = name, Expected = isExpected };
+                })
+                .ToList()
+                .OrderBy(r => r.Expected ? 0 : 1)
+                .ThenBy(r => r.Channel.Receive ? 0 : 1)
+                .ThenBy(r => r.Channel.Number)
+                .Select(r => new object[]
+                {
+                    r.Channel.Number, r.Name, r.Channel.Receive ? "rx" : "tx", r.Channel.FlowCount, r.Expected ? "e" : "u",
+                })
                 .ToList();
+
+            var missing = (expected ?? Enumerable.Empty<string>())
+                .Where(n => n != null && n.Trim().Length > 0)
+                .Where(n => !found.Contains(KeyOf(n)))
+                .Select(n => n.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
             var value = new Dictionary<string, object>
             {
                 { "present", true },
@@ -454,19 +485,48 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 { "preferredLeader", info.PreferredLeader },
                 { "followerOnly", info.FollowerOnly },
                 { "latencyUs", info.LatencyMicroseconds },
-                { "watched", watched },
+                { "configured", wanted.Count > 0 },
+                { "ch", rows },
+                { "missing", missing },
             };
 
+            // Not-in-use channels sit last, so they are the first left out when the value runs long.
             var json = JsonConvert.SerializeObject(value);
             var dropped = 0;
-            while (json.Length > MaxValueChars && watched.Count > 0)
+            while (json.Length > MaxValueChars && rows.Count > 0)
             {
-                watched.RemoveAt(watched.Count - 1);
+                rows.RemoveAt(rows.Count - 1);
                 dropped++;
                 value["more"] = dropped;
                 json = JsonConvert.SerializeObject(value);
             }
             return json;
+        }
+
+        private static HashSet<string> ExpectedNames(IEnumerable<string> expected)
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            if (expected == null) return set;
+            foreach (var n in expected)
+            {
+                if (n == null || n.Trim().Length == 0) continue;
+                set.Add(KeyOf(n));
+            }
+            return set;
+        }
+
+        /// <summary>"rx:judge mic" or "tx:ceilingmicaec_1", from a config name with an optional "tx:" or "rx:" prefix.</summary>
+        private static string KeyOf(string configName)
+        {
+            var n = configName.Trim();
+            var transmit = n.StartsWith("tx:", StringComparison.OrdinalIgnoreCase);
+            if (transmit || n.StartsWith("rx:", StringComparison.OrdinalIgnoreCase)) n = n.Substring(3).Trim();
+            return Key(!transmit, n);
+        }
+
+        private static string Key(bool receive, string name)
+        {
+            return (receive ? "rx:" : "tx:") + name.ToLowerInvariant();
         }
 
         /// <summary>The faults as the <c>activeFaults</c> feedback carries them.</summary>

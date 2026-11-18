@@ -57,6 +57,21 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
         [JsonProperty("resubscribeString")]
         public string ResubscribeString { get; set; }
+
+        /// <summary>Optional. What the system expects of the DSP's Dante interface, for monitoring.</summary>
+        [JsonProperty("dante")]
+        public TesiraDanteConfig Dante { get; set; }
+    }
+
+    public class TesiraDanteConfig
+    {
+        /// <summary>
+        /// The DSP's Dante channels this system uses, by the name the DSP reports (as Dante Controller shows
+        /// it). A name is a receive channel's unless it starts with "tx:". An expected channel with no flow is
+        /// reported as down; every other channel as not in use.
+        /// </summary>
+        [JsonProperty("expected")]
+        public List<string> Expected { get; set; }
     }
 
     public class TesiraExpanderBlockConfig

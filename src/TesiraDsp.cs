@@ -392,7 +392,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
             CreateDevInfo();
 
-            CreateDanteMonitor();
+            CreateDanteMonitor(props);
 
             CreateVoipMonitors(props);
 
@@ -482,9 +482,9 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             return lines > 0;
         }
 
-        private void CreateDanteMonitor()
+        private void CreateDanteMonitor(TesiraDspPropertiesConfig props)
         {
-            DanteMonitor = new TesiraDanteMonitor(this);
+            DanteMonitor = new TesiraDanteMonitor(this, props.Dante != null ? props.Dante.Expected : null);
             DeviceManager.AddDevice(DanteMonitor);
 
             foreach (var feedback in DanteMonitor.Feedbacks)
