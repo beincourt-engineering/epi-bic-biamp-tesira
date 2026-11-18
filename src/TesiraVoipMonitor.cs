@@ -11,8 +11,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     /// control/status block <c>&lt;tag&gt; get network</c> at each new session and every ten minutes, at the
     /// queue's lowest priority, and hands the interface (its MAC, addressing, VLAN and Ethernet setting) to the
     /// device info component, which lists it with the DSP's other interfaces and adds its MAC to the DSP's MACs.
-    /// Every minute it also asks <c>&lt;tag&gt; get cardStat</c>: the card's frame counters and uptime go to the timeline
-    /// monitor, its firmware to the card's interface.
+    /// Every minute it also asks <c>&lt;tag&gt; get cardStat</c>: the card's frames a minute go to the timeline monitor and,
+    /// with its firmware, onto the card's interface.
     /// </summary>
     public class TesiraVoipMonitor : TesiraDspControlPoint
     {
@@ -28,6 +28,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         // the card's interface and firmware as last read: cardStat carries the firmware, network the rest
         private TesiraNic lastNic;
         private string firmware;
+        private long? framesPerMin;
 
         /// <param name="parent">The DSP.</param>
         /// <param name="controlStatusTag">The VoIP control/status block's instance tag.</param>
@@ -57,7 +58,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             cardStatTimer.Start();
         }
 
-        /// <summary>The card's traffic, uptime and firmware, as a new session starts and every minute.</summary>
+        /// <summary>The card's traffic and firmware, as a new session starts and every minute.</summary>
         internal void AskCardStat()
         {
             Parent.CommandQueue.EnqueueCommand(new QueuedCommand(
@@ -85,14 +86,13 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                     }
 
                     var timeline = Parent.Timeline;
-                    if (timeline != null) timeline.SetVoipCard(tag, stat, Environment.TickCount64);
+                    var frames = timeline != null ? timeline.SetVoipCard(tag, stat, Environment.TickCount64) : null;
 
-                    // the card's firmware joins its interface in the DSP's network list
-                    if (stat.Firmware != null && stat.Firmware != firmware)
-                    {
-                        firmware = stat.Firmware;
-                        if (lastNic != null) HandOver(lastNic);
-                    }
+                    // the card's firmware and traffic join its interface in the DSP's network list
+                    var changed = (stat.Firmware != null && stat.Firmware != firmware) || frames != framesPerMin;
+                    if (stat.Firmware != null) firmware = stat.Firmware;
+                    framesPerMin = frames;
+                    if (changed && lastNic != null) HandOver(lastNic);
 
                     return;
                 }
@@ -118,6 +118,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         private void HandOver(TesiraNic nic)
         {
             nic.Firmware = firmware;
+            nic.FramesPerMin = framesPerMin;
             var devInfo = Parent.DevInfo;
             if (devInfo != null) devInfo.SetVoipNic(tag, nic);
         }

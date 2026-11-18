@@ -20,13 +20,12 @@ public class TesiraTimelineValuesTests
     [Theory]
     [InlineData(VerboseCardStat)]
     [InlineData(CardStat)]
-    public void Reads_a_voip_card_s_counters_uptime_and_firmware_either_way(string reply)
+    public void Reads_a_voip_card_s_counters_and_firmware_either_way(string reply)
     {
         var stat = TesiraTimelineValues.CardStat(reply)!;
 
         stat.RxFrames.Should().Be(1200);
         stat.TxFrames.Should().Be(800);
-        stat.UptimeS.Should().Be(((28 * 24 + 22) * 60 + 32) * 60 + 15);
         stat.Firmware.Should().Be("01.17.00.006");
     }
 
@@ -39,33 +38,6 @@ public class TesiraTimelineValuesTests
     public void Another_reply_is_no_card_stat(string reply)
     {
         TesiraTimelineValues.CardStat(reply).Should().BeNull();
-    }
-
-    [Fact]
-    public void A_card_stat_without_an_elapsed_time_has_no_uptime()
-    {
-        TesiraTimelineValues.CardStat(CardStat.Replace("\"028:22:32:15\"", "\"\""))!.UptimeS.Should().BeNull();
-    }
-
-    [Theory]
-    [InlineData("000:00:00:00", 0L)]
-    [InlineData("001:01:01:01", 90061L)]
-    [InlineData("028:22:32:15", 2500335L)]
-    public void Reads_an_elapsed_time_as_seconds(string elapsed, long seconds)
-    {
-        TesiraTimelineValues.ElapsedSeconds(elapsed).Should().Be(seconds);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("22:32:15")]
-    [InlineData("028:25:32:15")]
-    [InlineData("028:22:61:15")]
-    [InlineData("a:b:c:d")]
-    [InlineData("-1:00:00:00")]
-    public void Another_elapsed_time_is_no_uptime(string elapsed)
-    {
-        TesiraTimelineValues.ElapsedSeconds(elapsed).Should().BeNull();
     }
 
     [Fact]
@@ -109,7 +81,10 @@ public class TesiraTimelineValuesTests
         var nic = TesiraNicParser.VoipNic(
             "+OK [[\"78:45:01:00:00:02\" true 0 0 0 0 0 0 \"\" true false false false] [false 1] [3 2 true true false]]", "voip")!;
         nic.Firmware = "01.17.00.006";
+        nic.FramesPerMin = 3000;
 
-        TesiraNicParser.NetworkJson("Dsp", new List<TesiraNic> { nic }).Should().Contain("\"firmware\":\"01.17.00.006\"");
+        var json = TesiraNicParser.NetworkJson("Dsp", new List<TesiraNic> { nic });
+        json.Should().Contain("\"firmware\":\"01.17.00.006\"");
+        json.Should().Contain("\"framesPerMin\":3000");
     }
 }

@@ -78,10 +78,15 @@ public class DeviceIdentityMetadataTests
 
         var timeline = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraTimelineMonitor.cs"));
         timeline.Should().Contain("\"DEVICE get networkStatus\", \"networkStatus\", this, priority: (int)CommandPriority.Low");
-        foreach (var key in new[] { "controlLinkUp", "controlLinkMbps", "danteLinkUp", "danteSecondaryLinkUp", "voipLines",
-                     "voipLinesReady", "voipCallsActive", "voipFramesPerMin", "voipCardUptimeS" })
+        foreach (var key in new[] { "controlLinkUp", "controlLinkMbps", "danteLinkUp", "danteSecondaryLinkUp", "voipFramesPerMin" })
         {
             timeline.Should().Contain($"= \"{key}\";");
+        }
+
+        // VoIP lines, calls and the card's uptime were dropped (2026-11-18): only its traffic stays
+        foreach (var gone in new[] { "voipLines\"", "voipLinesReady", "voipCallsActive", "voipCardUptimeS" })
+        {
+            timeline.Should().NotContain(gone);
         }
 
         var voip = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraVoipMonitor.cs"));

@@ -17,9 +17,6 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// <summary>Frames the card has sent since it started.</summary>
         public long TxFrames { get; set; }
 
-        /// <summary>How long the card has run, in seconds; null when the reply doesn't say.</summary>
-        public long? UptimeS { get; set; }
-
         /// <summary>The card's application firmware (<c>ApploadId</c>), or null.</summary>
         public string Firmware { get; set; }
     }
@@ -31,7 +28,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     /// </summary>
     /// <remarks>
     /// A TesiraFORTÉ reports no CPU, memory, temperature or fan. What it does report that changes while it runs is
-    /// each port's link, whether its VoIP lines are registered and in a call, and the VoIP card's traffic and uptime.
+    /// each port's link and the VoIP card's traffic.
     /// </remarks>
     public static class TesiraTimelineValues
     {
@@ -59,7 +56,6 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             {
                 RxFrames = rx.Value,
                 TxFrames = tx.Value,
-                UptimeS = ElapsedSeconds(net.Get("elapsedTime", 2)?.AsText()),
                 Firmware = string.IsNullOrWhiteSpace(app) ? null : app.Trim(),
             };
         }
@@ -70,26 +66,6 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             var text = node?.AsText();
             long n;
             return text != null && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out n) && n >= 0 ? n : (long?)null;
-        }
-
-        /// <summary>
-        /// <c>DDD:HH:MM:SS</c> (days, hours, minutes, seconds; <c>028:22:32:15</c> is 28 days and 22 hours) in seconds.
-        /// Null for anything else.
-        /// </summary>
-        public static long? ElapsedSeconds(string elapsed)
-        {
-            if (string.IsNullOrWhiteSpace(elapsed)) return null;
-            var parts = elapsed.Trim().Split(':');
-            if (parts.Length != 4) return null;
-
-            var n = new long[4];
-            for (var i = 0; i < 4; i++)
-            {
-                if (!long.TryParse(parts[i], NumberStyles.None, CultureInfo.InvariantCulture, out n[i])) return null;
-            }
-
-            if (n[1] > 23 || n[2] > 59 || n[3] > 59) return null;
-            return ((n[0] * 24 + n[1]) * 60 + n[2]) * 60 + n[3];
         }
 
         /// <summary>

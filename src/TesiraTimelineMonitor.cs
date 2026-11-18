@@ -11,8 +11,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 {
     /// <summary>
     /// The readings a timeline draws for the DSP, for monitoring, on the DSP's own feedback list. A TesiraFORTÉ
-    /// reports no CPU, memory, temperature or fan, so these are what changes while it runs: each port's link, its VoIP
-    /// lines and calls, and the VoIP card's traffic and uptime. Read-only: the only question it asks is
+    /// reports no CPU, memory, temperature or fan, so these are what changes while it runs: each port's link and the
+    /// VoIP cards' traffic. Read-only: the only question it asks is
     /// <c>DEVICE get networkStatus</c> once a minute, at the queue's lowest priority.
     /// </summary>
     /// <remarks>
@@ -21,17 +21,14 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     /// <item><c>controlLinkUp</c>, <c>controlLinkMbps</c>: the control port, from networkStatus every minute.</item>
     /// <item><c>danteLinkUp</c>, <c>danteSecondaryLinkUp</c>: the Dante ports, from danteInfo (every ten minutes and
     /// whenever the fault list changes).</item>
-    /// <item><c>voipLines</c>, <c>voipLinesReady</c>, <c>voipCallsActive</c>: the VoIP lines the config lists, how many
-    /// are registered and how many calls are up, counted from the dialers every 15 seconds.</item>
-    /// <item><c>voipFramesPerMin</c>, <c>voipCardUptimeS</c>: frames the VoIP cards sent and received a minute, and the
-    /// shortest-running card's uptime, from each card's cardStat every minute.</item>
+    /// <item><c>voipFramesPerMin</c>: frames the VoIP cards sent and received a minute, from each card's cardStat every
+    /// minute; each card's own goes on its interface in the network feedback too.</item>
     /// </list>
     /// </remarks>
     public class TesiraTimelineMonitor : TesiraDspControlPoint
     {
         private const string keyFormatter = "{0}--{1}";
         private const double LinkPollMs = 60000;
-        private const double LineCountMs = 15000;
 
         private readonly object valueLock = new object();
         private readonly Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -41,26 +38,19 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         private readonly Dictionary<string, long> lastFrames = new Dictionary<string, long>(StringComparer.Ordinal);
         private readonly Dictionary<string, long> lastFramesAtMs = new Dictionary<string, long>(StringComparer.Ordinal);
         private readonly Dictionary<string, long?> framesPerMin = new Dictionary<string, long?>(StringComparer.Ordinal);
-        private readonly Dictionary<string, long?> uptime = new Dictionary<string, long?>(StringComparer.Ordinal);
 
         private System.Timers.Timer linkTimer;
-        private System.Timers.Timer lineTimer;
 
         public const string ControlLinkUpKey = "controlLinkUp";
         public const string ControlLinkMbpsKey = "controlLinkMbps";
         public const string DanteLinkUpKey = "danteLinkUp";
         public const string DanteSecondaryLinkUpKey = "danteSecondaryLinkUp";
-        public const string VoipLinesKey = "voipLines";
-        public const string VoipLinesReadyKey = "voipLinesReady";
-        public const string VoipCallsActiveKey = "voipCallsActive";
         public const string VoipFramesPerMinKey = "voipFramesPerMin";
-        public const string VoipCardUptimeKey = "voipCardUptimeS";
 
         /// <summary>Every key this monitor publishes, in the order a reader lists them.</summary>
         public static readonly string[] Keys =
         {
-            ControlLinkUpKey, ControlLinkMbpsKey, DanteLinkUpKey, DanteSecondaryLinkUpKey,
-            VoipLinesKey, VoipLinesReadyKey, VoipCallsActiveKey, VoipFramesPerMinKey, VoipCardUptimeKey,
+            ControlLinkUpKey, ControlLinkMbpsKey, DanteLinkUpKey, DanteSecondaryLinkUpKey, VoipFramesPerMinKey,
         };
 
         public TesiraTimelineMonitor(TesiraDsp parent)
@@ -105,10 +95,6 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 if (Parent.Communication.IsConnected) AskLinks();
             };
             linkTimer.Start();
-
-            lineTimer = new System.Timers.Timer(LineCountMs) { AutoReset = true };
-            lineTimer.Elapsed += (sender, e) => CountLines();
-            lineTimer.Start();
         }
 
         /// <summary>The control port's link, as a new session starts and every minute.</summary>
@@ -160,58 +146,32 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             if (secondary != null) Set(DanteSecondaryLinkUpKey, TesiraTimelineValues.Text(secondary.LinkUp));
         }
 
-        /// <summary>A VoIP card's counters and uptime, from its control/status block <paramref name="tag"/>.</summary>
-        internal void SetVoipCard(string tag, TesiraVoipCardStat stat, long atMs)
+        /// <summary>
+        /// A VoIP card's counters, from its control/status block <paramref name="tag"/>: its frames a minute since its
+        /// previous read, which it returns for the card's own interface (null when it can't say yet).
+        /// </summary>
+        internal long? SetVoipCard(string tag, TesiraVoipCardStat stat, long atMs)
         {
-            if (stat == null) return;
+            if (stat == null) return null;
             long? sum;
-            long? shortest;
+            long? mine;
             lock (valueLock)
             {
                 long previous;
                 long previousAt;
                 var had = lastFrames.TryGetValue(tag, out previous) & lastFramesAtMs.TryGetValue(tag, out previousAt);
                 var frames = stat.RxFrames + stat.TxFrames;
-                framesPerMin[tag] = TesiraTimelineValues.FramesPerMinute(had ? previous : (long?)null, had ? previousAt : (long?)null, frames, atMs);
+                mine = TesiraTimelineValues.FramesPerMinute(had ? previous : (long?)null, had ? previousAt : (long?)null, frames, atMs);
+                framesPerMin[tag] = mine;
                 lastFrames[tag] = frames;
                 lastFramesAtMs[tag] = atMs;
-                uptime[tag] = stat.UptimeS;
 
                 // every card's frames together; a card not yet measured leaves the sum unread
                 sum = framesPerMin.Values.Any(v => v == null) ? (long?)null : framesPerMin.Values.Sum(v => v.Value);
-                var known = uptime.Values.Where(v => v != null).Select(v => v.Value).ToList();
-                shortest = known.Count == 0 ? (long?)null : known.Min();
             }
 
             Set(VoipFramesPerMinKey, TesiraTimelineValues.Text(sum));
-            Set(VoipCardUptimeKey, TesiraTimelineValues.Text(shortest));
-        }
-
-        /// <summary>The VoIP lines, how many are registered and how many calls are up, from the dialers.</summary>
-        private void CountLines()
-        {
-            try
-            {
-                int lines;
-                int ready;
-                int calls;
-                if (!Parent.VoipLineCounts(out lines, out ready, out calls)) return;
-                Set(VoipLinesKey, TesiraTimelineValues.Text(lines));
-                // not connected, nothing is known about the lines: leave a gap rather than none ready
-                if (!Parent.Communication.IsConnected)
-                {
-                    Set(VoipLinesReadyKey, "");
-                    Set(VoipCallsActiveKey, "");
-                    return;
-                }
-
-                Set(VoipLinesReadyKey, TesiraTimelineValues.Text(ready));
-                Set(VoipCallsActiveKey, TesiraTimelineValues.Text(calls));
-            }
-            catch (Exception e)
-            {
-                this.LogError("Error counting the VoIP lines: {error}", e.Message);
-            }
+            return mine;
         }
 
         public override void LinkToApi(BasicTriList trilist, uint joinStart, string joinMapKey, EiscApiAdvanced bridge)

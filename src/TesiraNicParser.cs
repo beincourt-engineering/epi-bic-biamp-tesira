@@ -44,6 +44,9 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
         /// <summary>The card's own firmware (VoIP card, from its cardStat).</summary>
         [JsonProperty("firmware", NullValueHandling = NullValueHandling.Ignore)] public string Firmware { get; set; }
+
+        /// <summary>Frames the card sent and received a minute (VoIP card, from two cardStat reads), or null.</summary>
+        [JsonProperty("framesPerMin", NullValueHandling = NullValueHandling.Ignore)] public long? FramesPerMin { get; set; }
     }
 
     /// <summary>

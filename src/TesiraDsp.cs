@@ -126,7 +126,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
         private List<TesiraVoipMonitor> VoipMonitors { get; set; } = new List<TesiraVoipMonitor>();
 
-        /// <summary>The readings a timeline draws for the DSP: its ports' links, VoIP lines and calls, VoIP card traffic.</summary>
+        /// <summary>The readings a timeline draws for the DSP: its ports' links and its VoIP cards' traffic.</summary>
         internal TesiraTimelineMonitor Timeline { get; private set; }
 
         private bool initalSubscription = true;
@@ -467,19 +467,6 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             {
                 Feedbacks.Add(feedback);
             }
-        }
-
-        /// <summary>
-        /// The VoIP lines the config lists, how many are registered and how many calls are up on them (each call
-        /// appearance off hook is a call). False when the DSP has no VoIP line.
-        /// </summary>
-        internal bool VoipLineCounts(out int lines, out int ready, out int calls)
-        {
-            var voip = Dialers.Values.Where(d => d != null && d.IsVoip).ToList();
-            lines = voip.Count;
-            ready = voip.Count(d => d.LineReady);
-            calls = voip.Sum(d => d.Appearances == null ? 0 : d.Appearances.Count(a => a.OffHookStatus));
-            return lines > 0;
         }
 
         private void CreateDanteMonitor(TesiraDspPropertiesConfig props)
