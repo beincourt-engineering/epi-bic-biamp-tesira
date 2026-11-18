@@ -41,6 +41,9 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
         /// <summary>The port's Ethernet setting (VoIP card), e.g. auto, full duplex.</summary>
         [JsonProperty("ethernet", NullValueHandling = NullValueHandling.Ignore)] public string Ethernet { get; set; }
+
+        /// <summary>The card's own firmware (VoIP card, from its cardStat).</summary>
+        [JsonProperty("firmware", NullValueHandling = NullValueHandling.Ignore)] public string Firmware { get; set; }
     }
 
     /// <summary>

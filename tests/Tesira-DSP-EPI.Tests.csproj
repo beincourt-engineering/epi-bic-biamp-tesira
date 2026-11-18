@@ -30,5 +30,6 @@
     <Compile Include="..\src\TesiraDeviceInfoParser.cs" Link="TesiraDeviceInfoParser.cs" />
     <Compile Include="..\src\TesiraDanteParser.cs" Link="TesiraDanteParser.cs" />
     <Compile Include="..\src\TesiraNicParser.cs" Link="TesiraNicParser.cs" />
+    <Compile Include="..\src\TesiraTimelineValues.cs" Link="TesiraTimelineValues.cs" />
   </ItemGroup>
 </Project>

@@ -126,6 +126,9 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
         private List<TesiraVoipMonitor> VoipMonitors { get; set; } = new List<TesiraVoipMonitor>();
 
+        /// <summary>The readings a timeline draws for the DSP: its ports' links, VoIP lines and calls, VoIP card traffic.</summary>
+        internal TesiraTimelineMonitor Timeline { get; private set; }
+
         private bool initalSubscription = true;
 
         private readonly object watchdogLock = new object();
@@ -393,6 +396,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 
             CreateVoipMonitors(props);
 
+            CreateTimelineMonitor();
+
             //Keep me at the end of this method!
             CreateExpanderTracker(props);
 
@@ -453,6 +458,30 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// The Dante interface and active faults, read for monitoring. Its feedbacks go on the DSP's own
         /// list, so a reader of the DSP's feedbacks sees them.
         /// </summary>
+        private void CreateTimelineMonitor()
+        {
+            Timeline = new TesiraTimelineMonitor(this);
+            DeviceManager.AddDevice(Timeline);
+
+            foreach (var feedback in Timeline.Feedbacks)
+            {
+                Feedbacks.Add(feedback);
+            }
+        }
+
+        /// <summary>
+        /// The VoIP lines the config lists, how many are registered and how many calls are up on them (each call
+        /// appearance off hook is a call). False when the DSP has no VoIP line.
+        /// </summary>
+        internal bool VoipLineCounts(out int lines, out int ready, out int calls)
+        {
+            var voip = Dialers.Values.Where(d => d != null && d.IsVoip).ToList();
+            lines = voip.Count;
+            ready = voip.Count(d => d.LineReady);
+            calls = voip.Sum(d => d.Appearances == null ? 0 : d.Appearances.Count(a => a.OffHookStatus));
+            return lines > 0;
+        }
+
         private void CreateDanteMonitor()
         {
             DanteMonitor = new TesiraDanteMonitor(this);
@@ -1329,7 +1358,11 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             foreach (var voip in VoipMonitors)
             {
                 voip.AskNetwork();
+                voip.AskCardStat();
             }
+
+            // the control port's link, for the timeline (asked again every minute)
+            Timeline?.AskLinks();
 
             // Queue all min level requests
             var volumeComponents = ControlPointList.OfType<IVolumeComponent>().ToList();

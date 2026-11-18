@@ -67,6 +67,32 @@ public class DeviceIdentityMetadataTests
     }
 
     [Fact]
+    public void The_timeline_readings_go_on_the_dsp_s_own_list_and_are_asked_at_the_lowest_priority()
+    {
+        // telemetry reads a device's feedbacks by key off the DSP: the timeline monitor's must be on its list
+        var dsp = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraDsp.cs"));
+        dsp.Should().Contain("Timeline = new TesiraTimelineMonitor(this);");
+        dsp.Should().Contain("foreach (var feedback in Timeline.Feedbacks)");
+        dsp.Should().Contain("voip.AskCardStat();");
+        dsp.Should().Contain("Timeline?.AskLinks();");
+
+        var timeline = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraTimelineMonitor.cs"));
+        timeline.Should().Contain("\"DEVICE get networkStatus\", \"networkStatus\", this, priority: (int)CommandPriority.Low");
+        foreach (var key in new[] { "controlLinkUp", "controlLinkMbps", "danteLinkUp", "danteSecondaryLinkUp", "voipLines",
+                     "voipLinesReady", "voipCallsActive", "voipFramesPerMin", "voipCardUptimeS" })
+        {
+            timeline.Should().Contain($"= \"{key}\";");
+        }
+
+        var voip = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraVoipMonitor.cs"));
+        voip.Should().Contain("string.Format(\"{0} get cardStat\", tag), \"cardStat\", this, priority: (int)CommandPriority.Low");
+
+        // a networkStatus read every minute tells telemetry of a device info change only when something changed
+        var info = File.ReadAllText(Path.Combine(AssemblyFixture.SourceDirectory, "TesiraDspDeviceInfo.cs"));
+        info.Should().Contain("if (macsChanged || before != string.Join(");
+    }
+
+    [Fact]
     public void The_component_hands_out_the_identity_and_fills_its_model()
     {
         var path = Path.Combine(AssemblyFixture.SourceDirectory, "TesiraDspDeviceInfo.cs");

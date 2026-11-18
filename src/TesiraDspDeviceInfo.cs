@@ -199,6 +199,47 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// </summary>
         public StringFeedback NetworkFeedback { get; private set; }
 
+        /// <summary>
+        /// The control port(s) from a <c>DEVICE get networkStatus</c> reply: host name, MAC and address, every
+        /// interface's MAC and the interfaces themselves. Asked at each session and, by the timeline monitor, every
+        /// minute; the device info changed event fires only when something in it changed. False when the reply isn't
+        /// one: replies are matched to commands by order, and a late one lands on the wrong command.
+        /// </summary>
+        internal bool SetControlNetwork(string message)
+        {
+            var status = TesiraDeviceInfoParser.NetworkStatus(message);
+            if (status == null) return false;
+
+            var before = string.Join("|", new[] { Hostname, MacAddress, IpAddress });
+            if (status.Hostname != null) Hostname = status.Hostname;
+            MacAddress = status.MacAddress;
+            if (status.IpAddress != null) IpAddress = status.IpAddress;
+
+            this.LogDebug("Parsed Hostname: {hostname}, MacAddress: {macAddress}, IpAddress: {ipAddress}",
+                Hostname, MacAddress, IpAddress);
+
+            // Mirror onto the DeviceInfo DTO consumed by IDeviceInfoProvider
+            // clients (Mobile Control, device info reporting).
+            DeviceInfo.HostName = Hostname;
+            DeviceInfo.MacAddress = MacAddress;
+            DeviceInfo.IpAddress = IpAddress;
+
+            lock (macLock)
+            {
+                interfaceMacs = status.MacAddresses;
+                controlNics = TesiraNicParser.ControlNics(message);
+            }
+
+            var macsChanged = ApplyMacList();
+            ApplyNetwork();
+            if (macsChanged || before != string.Join("|", new[] { Hostname, MacAddress, IpAddress }))
+            {
+                OnDeviceInfoChanged();
+            }
+
+            return true;
+        }
+
         /// <summary>The Dante ports from <c>DEVICE get danteInfo</c>, primary then secondary.</summary>
         public void SetDanteNetwork(List<TesiraNic> nics)
         {
@@ -208,6 +249,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
             }
 
             ApplyNetwork();
+
+            // the timeline monitor charts the Dante ports' links
+            var timeline = Parent.Timeline;
+            if (timeline != null) timeline.SetDanteLinks(danteNics);
         }
 
         /// <summary>A VoIP card's interface, from its control/status block <paramref name="tag"/>.</summary>
@@ -372,37 +417,14 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 {
                     case "networkStatus":
                         {
-                            // Null when this isn't a networkStatus reply: replies are matched to
-                            // commands by order, and a late one lands on the wrong command.
-                            var status = TesiraDeviceInfoParser.NetworkStatus(message);
-                            if (status == null)
+                            if (!SetControlNetwork(message))
                             {
                                 this.LogDebug("Not a networkStatus reply, ignored: {message}", message);
-                                break;
                             }
 
-                            if (status.Hostname != null) Hostname = status.Hostname;
-                            MacAddress = status.MacAddress;
-                            if (status.IpAddress != null) IpAddress = status.IpAddress;
-
-                            this.LogDebug("Parsed Hostname: {hostname}, MacAddress: {macAddress}, IpAddress: {ipAddress}",
-                                Hostname, MacAddress, IpAddress);
-
-                            // Mirror onto the DeviceInfo DTO consumed by IDeviceInfoProvider
-                            // clients (Mobile Control, device info reporting).
-                            DeviceInfo.HostName = Hostname;
-                            DeviceInfo.MacAddress = MacAddress;
-                            DeviceInfo.IpAddress = IpAddress;
-
-                            lock (macLock)
-                            {
-                                interfaceMacs = status.MacAddresses;
-                                controlNics = TesiraNicParser.ControlNics(message);
-                            }
-
-                            ApplyMacList();
-                            ApplyNetwork();
-                            OnDeviceInfoChanged();
+                            // the timeline monitor reads the control port's link from the same reply
+                            var timeline = Parent.Timeline;
+                            if (timeline != null) timeline.SetControlLink(TesiraNicParser.ControlNics(message));
                             break;
                         }
 
