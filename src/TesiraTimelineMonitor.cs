@@ -19,7 +19,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     /// Feedbacks, each the text of a number or <c>true</c>/<c>false</c>, empty until read:
     /// <list type="bullet">
     /// <item><c>controlLinkUp</c>, <c>controlLinkMbps</c>: the control port, from networkStatus every minute.</item>
-    /// <item><c>danteLinkUp</c>, <c>danteSecondaryLinkUp</c>: the Dante ports, from danteInfo (every ten minutes and
+    /// <item><c>danteLinkUp</c>, <c>danteSecondaryLinkUp</c>: the Dante ports, from danteInfo (every minute and
     /// whenever the fault list changes).</item>
     /// <item><c>voipFramesPerMin</c>: frames the VoIP cards sent and received a minute, from each card's cardStat every
     /// minute; each card's own goes on its interface in the network feedback too.</item>

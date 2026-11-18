@@ -9,7 +9,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
 {
     /// <summary>
     /// Watches the DSP's Dante interface and its active faults, for monitoring. Read-only: it only asks
-    /// <c>DEVICE get danteInfo</c> (at each new session and every ten minutes) and
+    /// <c>DEVICE get danteInfo</c> (at each new session and every minute) and
     /// <c>DEVICE get activeFaultList</c> (every 30 seconds), at the queue's lowest priority so control
     /// commands always go first.
     /// </summary>
@@ -31,7 +31,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     {
         private const string keyFormatter = "{0}--{1}";
         private const double FaultPollMs = 30000;
-        private const double DantePollMs = 600000;
+        // Every minute, not only when the fault list changes: while the DSP's Dante fault stays on (a channel this
+        // system doesn't use), a dropped expected flow changes no fault, and only this read shows it. One short reply
+        // a minute, at the queue's lowest priority.
+        private const double DantePollMs = 60000;
 
         public StringFeedback DanteFeedback { get; private set; }
         public StringFeedback ActiveFaultsFeedback { get; private set; }
