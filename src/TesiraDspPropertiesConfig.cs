@@ -72,6 +72,14 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// </summary>
         [JsonProperty("expected")]
         public List<string> Expected { get; set; }
+
+        /// <summary>
+        /// The system's Dante devices, by their Dante device names (as Dante Controller shows them). Passed on
+        /// with the Dante report, so monitoring can tell this system's devices from other systems' on a shared
+        /// network, and say when one of them is no longer heard.
+        /// </summary>
+        [JsonProperty("devices")]
+        public List<string> Devices { get; set; }
     }
 
     public class TesiraExpanderBlockConfig

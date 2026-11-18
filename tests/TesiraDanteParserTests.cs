@@ -171,6 +171,28 @@ public class TesiraDanteParserTests
             .Should().Equal("Receive channel long name 40", "Receive channel long name 63");
     }
 
+    [Fact]
+    public void The_dante_value_passes_on_the_system_dante_device_names_and_keeps_them_when_it_runs_long()
+    {
+        var devices = new[] { " Lectern-Mic-DAN ", "Room-PC", "room-pc", "", null, new string('x', 80) };
+
+        var json = JObject.Parse(TesiraDanteValues.DanteJson(TesiraDanteParser.DanteInfo(DanteInfo)!, null, devices));
+
+        json["devices"]!.Select(d => d.Value<string>()).Should()
+            .Equal("Lectern-Mic-DAN", "Room-PC", new string('x', TesiraDanteValues.MaxDeviceNameChars));
+
+        // without a list there is no devices key
+        JObject.Parse(TesiraDanteValues.DanteJson(TesiraDanteParser.DanteInfo(DanteInfo)!))["devices"].Should().BeNull();
+
+        // a long value leaves channels out, never the device names
+        var channels = string.Join(" ", Enumerable.Range(0, 64).Select(i => $"[\"Receive channel long name {i:00}\" {i} RX false 1]"));
+        var reply = "+OK [[] [] [] false false 1000 [" + channels + "]]";
+        var many = Enumerable.Range(0, 40).Select(i => $"Device-{i:00}").ToArray();
+        var text = TesiraDanteValues.DanteJson(TesiraDanteParser.DanteInfo(reply)!, null, many);
+        text.Length.Should().BeLessOrEqualTo(TesiraDanteValues.MaxValueChars);
+        JObject.Parse(text)["devices"]!.Count().Should().Be(TesiraDanteValues.MaxDevices);
+    }
+
     // activeFaultList: a list of indicator entries (in the device, in the system), each an id, its name, the
     // faults under it (an id, a name and an instance) and the serial. These two are a Tesira FORTE's answers
     // with one Dante channel set to fault when inactive and nothing subscribed to it.

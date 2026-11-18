@@ -50,13 +50,17 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         private System.Timers.Timer danteTimer;
 
         private readonly System.Collections.Generic.List<string> expected;
+        private readonly System.Collections.Generic.List<string> devices;
 
         /// <param name="parent">The DSP.</param>
         /// <param name="expected">The config's <c>dante.expected</c> channel names, or null when not set.</param>
-        public TesiraDanteMonitor(TesiraDsp parent, System.Collections.Generic.IEnumerable<string> expected = null)
+        /// <param name="devices">The config's <c>dante.devices</c> Dante device names, or null when not set.</param>
+        public TesiraDanteMonitor(TesiraDsp parent, System.Collections.Generic.IEnumerable<string> expected = null,
+            System.Collections.Generic.IEnumerable<string> devices = null)
             : base("DEVICE", "DEVICE", 0, 0, parent, string.Format(keyFormatter, parent.Key, "Dante"), "Dante", 0)
         {
             this.expected = expected == null ? null : new System.Collections.Generic.List<string>(expected);
+            this.devices = devices == null ? null : new System.Collections.Generic.List<string>(devices);
             DanteFeedback = new StringFeedback("dante", () => dante);
             ActiveFaultsFeedback = new StringFeedback("activeFaults", () => activeFaults);
             HealthLevelFeedback = new StringFeedback("HealthLevel", () => healthLevel);
@@ -132,7 +136,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                             this.LogDebug("Not a danteInfo reply, ignored: {message}", message);
                             break;
                         }
-                        Set(ref dante, TesiraDanteValues.DanteJson(info, expected), DanteFeedback);
+                        Set(ref dante, TesiraDanteValues.DanteJson(info, expected, devices), DanteFeedback);
                         // The Dante interface's MACs join the DSP's MAC list after its network interfaces'.
                         var devInfo = Parent.DevInfo;
                         if (devInfo != null)

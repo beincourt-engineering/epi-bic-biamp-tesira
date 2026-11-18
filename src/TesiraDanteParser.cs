@@ -433,6 +433,10 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
     {
         public const int MaxValueChars = 2000;
 
+        /// <summary>At most this many Dante device names are passed on, each cut to <see cref="MaxDeviceNameChars"/>.</summary>
+        public const int MaxDevices = 32;
+        public const int MaxDeviceNameChars = 64;
+
         /// <summary>
         /// The Dante interface as the <c>dante</c> feedback carries it. <c>ch</c> lists every channel as
         /// <c>[number, name, "rx" or "tx", flowCount, "e" or "u"]</c>: "e" when the system's config expects it to
@@ -446,7 +450,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
         /// The channel names from the config's <c>dante.expected</c>. A name is a receive channel's unless it
         /// starts with <c>tx:</c>. Names match trimmed and ignoring case. Null or empty when not configured.
         /// </param>
-        public static string DanteJson(TesiraDanteInfo info, IEnumerable<string> expected = null)
+        /// <param name="devices">
+        /// The config's <c>dante.devices</c>: the system's Dante device names, passed on as <c>devices</c> (trimmed,
+        /// without repeats) so monitoring can tell this system's devices on the network from other systems'. Left
+        /// out when not configured. Never trimmed to fit: channels are left out first.
+        /// </param>
+        public static string DanteJson(TesiraDanteInfo info, IEnumerable<string> expected = null, IEnumerable<string> devices = null)
         {
             var wanted = ExpectedNames(expected);
             var found = new HashSet<string>(StringComparer.Ordinal);
@@ -489,6 +498,14 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                 { "ch", rows },
                 { "missing", missing },
             };
+            var deviceNames = (devices ?? Enumerable.Empty<string>())
+                .Where(n => n != null && n.Trim().Length > 0)
+                .Select(n => n.Trim())
+                .Select(n => n.Length > MaxDeviceNameChars ? n.Substring(0, MaxDeviceNameChars) : n)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(MaxDevices)
+                .ToList();
+            if (deviceNames.Count > 0) value["devices"] = deviceNames;
 
             // Not-in-use channels sit last, so they are the first left out when the value runs long.
             var json = JsonConvert.SerializeObject(value);
