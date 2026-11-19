@@ -152,7 +152,11 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira
                     string.Format("\"{0}\" {1} {2} {3}", instanceTagLocal, command, attributeCode, value);
             }
 
-            Parent.CommandQueue.EnqueueCommand(new QueuedCommand(cmd, attributeCode, this, priority: (int)CommandPriority.Critical));
+            // A mute change goes ahead of whatever is waiting: a preset recall can take seconds on the DSP, and a
+            // mute held behind a few of them is late. No other command's order changes.
+            var express = attributeCode == "mute" && (command == "set" || command == "toggle");
+
+            Parent.CommandQueue.EnqueueCommand(new QueuedCommand(cmd, attributeCode, this, priority: (int)CommandPriority.Critical, express: express));
         }
 
         public virtual void ParseGetMessage(string attributeCode, string message)

@@ -7,7 +7,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Queue
 {
     public class TesiraQueue
     {
-        private CrestronQueue<QueuedCommand> LocalQueue { get; set; }
+        private ExpressLaneQueue<QueuedCommand> LocalQueue { get; set; }
 
         private TesiraDsp Parent { get; set; }
 
@@ -39,11 +39,11 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Queue
         /// <summary>
         /// Constructor for Tesira Queue
         /// </summary>
-        /// <param name="queueSize">Maximum Queue Size (ignored for priority queue)</param>
+        /// <param name="queueSize">Most commands each lane holds (express and normal)</param>
         /// <param name="parent">Parent TesiraDsp Class</param>
         public TesiraQueue(int queueSize, TesiraDsp parent)
         {
-            LocalQueue = new CrestronQueue<QueuedCommand>(queueSize);
+            LocalQueue = new ExpressLaneQueue<QueuedCommand>(queueSize);
             Parent = parent;
             CommandQueueInProgress = false;
         }
@@ -95,7 +95,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Queue
                 Parent.LogVerbose("[EnqueueCommand] Command Queue {state} in progress.", CommandQueueInProgress ? "is" : "is not");
 
                 // Never block while holding the lock: a full queue drops the command instead.
-                if (!LocalQueue.TryToEnqueue(commandToEnqueue))
+                if (!LocalQueue.TryEnqueue(commandToEnqueue, commandToEnqueue.Express))
                 {
                     Parent.LogWarning("[EnqueueCommand] Command queue is full ({count} items); dropping '{command}'", LocalQueue.Count, commandToEnqueue.Command);
                     return;
@@ -150,7 +150,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Queue
 
                 CommandQueueInProgress = true;
 
-                if (!LocalQueue.Dequeue(out lastDequeued))
+                if (!LocalQueue.TryDequeue(out lastDequeued))
                 {
                     Parent.LogError("[SendNextQueuedCommand] Failed to dequeue command despite queue not being empty");
                     CommandQueueInProgress = false;

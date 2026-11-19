@@ -41,7 +41,8 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Queue
     /// <param name="bypassTxQueue">bypass TX Queue for this command</param>
     /// <param name="sendLineRaw">send command without appending delimiter</param>
     /// <param name="priority">command priority (higher values = higher priority)</param>
-    public QueuedCommand(string command, string attributeCode, ISubscribedComponent controlPoint, bool bypassTxQueue = false, bool sendLineRaw = false, int priority = 1)
+    /// <param name="express">send ahead of every command in the normal lane (see <see cref="ExpressLaneQueue{T}"/>)</param>
+    public QueuedCommand(string command, string attributeCode, ISubscribedComponent controlPoint, bool bypassTxQueue = false, bool sendLineRaw = false, int priority = 1, bool express = false)
     {
       Command = command;
       AttributeCode = attributeCode;
@@ -49,6 +50,7 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Queue
       BypassTxQueue = bypassTxQueue;
       SendLineRaw = sendLineRaw;
       Priority = priority;
+      Express = express;
     }
 
     /// <summary>
@@ -80,6 +82,12 @@ namespace Pepperdash.Essentials.Plugins.DSP.Biamp.Tesira.Queue
     /// Command priority (higher values = higher priority)
     /// </summary>
     public readonly int Priority;
+
+    /// <summary>
+    /// Sent ahead of every command waiting in the normal lane: mute changes, so a mute is not held behind slow
+    /// commands such as preset recalls
+    /// </summary>
+    public readonly bool Express;
   }
 
 }

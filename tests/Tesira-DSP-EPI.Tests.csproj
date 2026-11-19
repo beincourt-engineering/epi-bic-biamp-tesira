@@ -31,5 +31,6 @@
     <Compile Include="..\src\TesiraDanteParser.cs" Link="TesiraDanteParser.cs" />
     <Compile Include="..\src\TesiraNicParser.cs" Link="TesiraNicParser.cs" />
     <Compile Include="..\src\TesiraTimelineValues.cs" Link="TesiraTimelineValues.cs" />
+    <Compile Include="..\src\Queue\ExpressLaneQueue.cs" Link="ExpressLaneQueue.cs" />
   </ItemGroup>
 </Project>
